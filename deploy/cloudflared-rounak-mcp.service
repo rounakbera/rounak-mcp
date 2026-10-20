@@ -5,7 +5,7 @@ After=network-online.target rounak-mcp.service
 [Service]
 EnvironmentFile=@DIR@/.env
 # cloudflared only needs TUNNEL_TOKEN; drop the app's secrets from its environment.
-UnsetEnvironment=GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET MCP_CLIENT_ID MCP_CLIENT_SECRET ENCRYPTION_KEY
+UnsetEnvironment=OWNER_EMAIL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET MCP_CLIENT_ID MCP_CLIENT_SECRET ENCRYPTION_KEY
 ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run
 Restart=on-failure
 NoNewPrivileges=true
