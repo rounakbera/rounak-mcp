@@ -26,7 +26,7 @@ export class Google {
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      ...(gmail && { access_type: 'offline', prompt: 'consent' }),
+      ...(gmail && { access_type: 'offline', prompt: 'select_account consent' }),
       ...(loginHint && { login_hint: loginHint }),
     });
     return url.href;
