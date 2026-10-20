@@ -28,7 +28,7 @@ describe('persistence', () => {
     assert.equal(refreshed.status, 200);
     const client = await connect(ctx, refreshed.body.access_token);
     const grants = ctx.google.state.refreshGrants;
-    assert.equal((await call(client, 'search_threads', { query: 'invoice' })).length, 1);
+    assert.equal((await call(client, 'mail_search_threads', { query: 'invoice' })).length, 1);
     assert.equal(ctx.google.state.refreshGrants, grants + 1, 'Google access token refreshed from the stored refresh token');
   });
 });

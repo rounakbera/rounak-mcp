@@ -1,6 +1,6 @@
 [Unit]
-Description=Cloudflare tunnel for gmail-mcp
-After=network-online.target gmail-mcp.service
+Description=Cloudflare tunnel for rounak-mcp
+After=network-online.target rounak-mcp.service
 
 [Service]
 EnvironmentFile=@DIR@/.env

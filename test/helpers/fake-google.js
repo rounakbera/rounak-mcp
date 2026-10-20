@@ -116,7 +116,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   return {
     state,
     mailbox,
-    endpoints: { authUrl: `${base}/auth`, tokenUrl: `${base}/token`, revokeUrl: `${base}/revoke`, gmailUrl: `${base}/gmail/v1/users/me` },
+    endpoints: { authUrl: `${base}/auth`, tokenUrl: `${base}/token`, revokeUrl: `${base}/revoke`, gmail: `${base}/gmail/v1/users/me` },
     close: () => new Promise((r) => server.close(r)),
   };
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=Gmail MCP server
+Description=rounak-mcp server
 After=network-online.target
 
 [Service]

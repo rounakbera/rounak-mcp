@@ -6,6 +6,7 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import { Google } from './google.js';
 import { OAuth } from './oauth.js';
 import { Store } from './store.js';
+import { loadModules } from './modules/index.js';
 import { registerTools } from './tools.js';
 
 export function createApp(config, { googleEndpoints } = {}) {
@@ -17,6 +18,7 @@ export function createApp(config, { googleEndpoints } = {}) {
     store,
   });
   const oauth = new OAuth({ config, store, google });
+  const modules = loadModules(config.modules);
   const mcpUrl = new URL('/mcp', config.publicUrl);
 
   const app = express();
@@ -43,8 +45,8 @@ export function createApp(config, { googleEndpoints } = {}) {
   const bearer = requireBearerAuth({ verifier: oauth, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpUrl) });
   app.post('/mcp', bearer, express.json({ limit: '1mb' }), async (req, res) => {
     // Stateless: a fresh server and transport per request.
-    const server = new McpServer({ name: 'gmail', version: '1.0.0' });
-    registerTools(server, { store, google });
+    const server = new McpServer({ name: 'rounak-mcp', version: '1.0.0' });
+    registerTools(server, { store, google, modules });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => server.close());
     await server.connect(transport);

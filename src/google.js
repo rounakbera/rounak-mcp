@@ -2,11 +2,11 @@ export const GOOGLE_ENDPOINTS = {
   authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
   tokenUrl: 'https://oauth2.googleapis.com/token',
   revokeUrl: 'https://oauth2.googleapis.com/revoke',
-  gmailUrl: 'https://gmail.googleapis.com/gmail/v1/users/me',
+  // API base URLs used by modules, keyed by module name.
+  gmail: 'https://gmail.googleapis.com/gmail/v1/users/me',
 };
 
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
-export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
 
 export class Google {
   #accessTokens = new Map(); // email -> { token, expiresAt }
@@ -15,18 +15,18 @@ export class Google {
     Object.assign(this, { clientId, clientSecret, endpoints, store });
   }
 
-  // `gmail: true` asks for offline Gmail access (linking); otherwise sign-in only.
-  authUrl({ redirectUri, state, codeChallenge, gmail = false, loginHint }) {
+  // With `scopes` (linking): offline access to those APIs. Without: sign-in only.
+  authUrl({ redirectUri, state, codeChallenge, scopes, loginHint }) {
     const url = new URL(this.endpoints.authUrl);
     url.search = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: gmail ? `openid email ${GMAIL_SCOPE}` : 'openid email',
+      scope: ['openid', 'email', ...(scopes ?? [])].join(' '),
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      ...(gmail && { access_type: 'offline', prompt: 'select_account consent' }),
+      ...(scopes && { access_type: 'offline', prompt: 'select_account consent' }),
       ...(loginHint && { login_hint: loginHint }),
     });
     return url.href;
@@ -48,14 +48,15 @@ export class Google {
     await fetch(this.endpoints.revokeUrl, { method: 'POST', body: new URLSearchParams({ token }) });
   }
 
-  async gmail(email, method, path, body) {
-    const res = await fetch(`${this.endpoints.gmailUrl}${path}`, {
+  // Calls a Google API as a linked account.
+  async request(email, method, url, body) {
+    const res = await fetch(url, {
       method,
       headers: { authorization: `Bearer ${await this.#accessToken(email)}`, 'content-type': 'application/json' },
       body: body && JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Gmail API ${res.status}: ${json.error?.message ?? res.statusText}`);
+    if (!res.ok) throw new Error(`Google API ${res.status}: ${json.error?.message ?? res.statusText}`);
     return json;
   }
 

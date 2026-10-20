@@ -25,8 +25,8 @@ describe('accounts (npm run link)', () => {
   });
 
   test('requires an account when several are linked', async () => {
-    await assert.rejects(call(client, 'list_labels'), /Specify an account/);
-    await assert.rejects(call(client, 'list_labels', { account: 'nobody@example.com' }), /Unknown account/);
+    await assert.rejects(call(client, 'mail_list_labels'), /Specify an account/);
+    await assert.rejects(call(client, 'mail_list_labels', { account: 'nobody@example.com' }), /Unknown account/);
   });
 
   test('unlinking revokes the Google grant', async () => {

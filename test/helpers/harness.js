@@ -11,6 +11,7 @@ import { createApp } from '../../src/app.js';
 import { CLAUDE_REDIRECT_URIS } from '../../src/config.js';
 import { Google } from '../../src/google.js';
 import { linkAccount } from '../../src/link.js';
+import { loadModules, scopesFor } from '../../src/modules/index.js';
 import { sha256 } from '../../src/oauth.js';
 import { Store } from '../../src/store.js';
 import { gmailMessage, startFakeGoogle } from './fake-google.js';
@@ -38,6 +39,7 @@ export async function startApp(ctx) {
     redirectUris: CLAUDE_REDIRECT_URIS,
     encryptionKey: KEY,
     dataDir: ctx.dataDir,
+    modules: ['mail'],
   };
   server.on('request', createApp(config, { googleEndpoints: ctx.google.endpoints }));
   ctx.app = { base: config.publicUrl, port, close: () => (server.closeAllConnections(), server.close()) };
@@ -45,7 +47,7 @@ export async function startApp(ctx) {
 
 // Fresh data dir, fake Google with one seeded thread per account, and a running app.
 export async function setup() {
-  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'gmail-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [] };
+  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [] };
   ctx.google.mailbox(OWNER).threads.push({
     id: 't1',
     messages: [gmailMessage({ id: 'm1', threadId: 't1', from: 'Alice <alice@example.com>', subject: 'Your invoice', body: 'invoice attached' })],
@@ -71,7 +73,7 @@ export function cli(ctx) {
 }
 
 export async function link(ctx, email) {
-  const { url, linked } = await linkAccount({ ...cli(ctx), port: 0 });
+  const { url, linked } = await linkAccount({ ...cli(ctx), port: 0, scopes: scopesFor(loadModules(['mail'])) });
   ctx.google.state.nextLogin = email;
   const toCallback = await fetch(url, { redirect: 'manual' });
   const res = await fetch(toCallback.headers.get('location'));

@@ -1,15 +1,16 @@
-// Link or unlink Gmail accounts from this machine:
-//   npm run link                    open Google consent via a localhost redirect
+// Link or unlink Google accounts from this machine:
+//   npm run link                    grant the enabled modules' scopes via a localhost redirect
 //   npm run link -- --remove EMAIL  revoke and forget an account
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from './config.js';
-import { GMAIL_SCOPE, Google } from './google.js';
+import { Google } from './google.js';
+import { loadModules, scopesFor } from './modules/index.js';
 import { random, sha256 } from './oauth.js';
 import { Store } from './store.js';
 
 // Starts a one-shot loopback server; returns the consent URL and a promise for the linked email.
-export async function linkAccount({ google, store, port }) {
+export async function linkAccount({ google, store, port, scopes }) {
   const state = random();
   const codeVerifier = random();
   let redirectUri;
@@ -23,7 +24,9 @@ export async function linkAccount({ google, store, port }) {
     try {
       if (url.searchParams.get('state') !== state || !url.searchParams.get('code')) throw new Error('Invalid or cancelled sign-in');
       const { email, tokens } = await google.exchangeCode({ code: url.searchParams.get('code'), codeVerifier, redirectUri });
-      if (!tokens.scope?.split(' ').includes(GMAIL_SCOPE) || !tokens.refresh_token) throw new Error('Gmail access was not granted');
+      const granted = tokens.scope?.split(' ') ?? [];
+      const missing = scopes.filter((s) => !granted.includes(s));
+      if (missing.length || !tokens.refresh_token) throw new Error(`Access not granted: ${missing.join(', ') || 'offline'}`);
       store.update(({ accounts }) => (accounts[email] = { refreshToken: tokens.refresh_token }));
       res.writeHead(200, { 'content-type': 'text/plain' }).end(`Linked ${email}. You can close this tab.`);
       finish.resolve(email);
@@ -34,7 +37,7 @@ export async function linkAccount({ google, store, port }) {
   });
   await new Promise((r) => server.listen(port, '127.0.0.1', r));
   redirectUri = `http://localhost:${server.address().port}/callback`;
-  return { url: google.authUrl({ redirectUri, state, codeChallenge: sha256(codeVerifier), gmail: true }), linked };
+  return { url: google.authUrl({ redirectUri, state, codeChallenge: sha256(codeVerifier), scopes }), linked };
 }
 
 export async function unlinkAccount({ google, store, email }) {
@@ -52,7 +55,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     await unlinkAccount({ google, store, email: process.argv[3]?.toLowerCase() });
     console.log(`Unlinked ${process.argv[3]}`);
   } else {
-    const { url, linked } = await linkAccount({ google, store, port: config.linkPort });
+    const { url, linked } = await linkAccount({ google, store, port: config.linkPort, scopes: scopesFor(loadModules(config.modules)) });
     console.log(`Open this URL in a browser on this machine:\n\n${url}\n`);
     console.log(`Linked ${await linked}. Linked accounts: ${Object.keys(store.read().accounts).join(', ')}`);
   }
