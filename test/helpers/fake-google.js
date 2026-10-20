@@ -4,13 +4,13 @@ import { createServer } from 'node:http';
 
 const b64url = (s) => Buffer.from(s).toString('base64url');
 
-export function gmailMessage({ id, threadId, from, subject, body }) {
+export function gmailMessage({ id, threadId, from, subject, body, snippet = body }) {
   const headers = { From: from, Subject: subject, Date: 'Mon, 19 Oct 2026 10:00:00 +0000', 'Message-ID': `<${id}@example.com>` };
   return {
     id,
     threadId,
     labelIds: ['INBOX', 'UNREAD'],
-    snippet: body,
+    snippet,
     payload: {
       mimeType: 'multipart/mixed',
       headers: Object.entries(headers).map(([name, value]) => ({ name, value })),

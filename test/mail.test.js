@@ -18,6 +18,7 @@ describe('mail', () => {
       [OWNER, 't1', 'Your invoice'],
       [WORK, 'w1', 'Q3 invoice'],
     ]);
+    assert.equal(results.find((r) => r.thread_id === 't1').snippet, "invoice attached & it's — here");
     const workOnly = await call(client, 'mail_search_threads', { query: 'invoice', account: WORK });
     assert.deepEqual(workOnly.map((r) => r.thread_id), ['w1']);
   });

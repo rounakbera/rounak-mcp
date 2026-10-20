@@ -5,6 +5,11 @@ export const header = (msg, name) =>
 
 export const parts = (part) => [part, ...(part?.parts ?? []).flatMap(parts)];
 
+// Gmail returns snippets HTML-escaped.
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+export const unescapeHtml = (s) =>
+  s?.replace(/&(#\d+|[a-z]+);/g, (m, e) => (e[0] === '#' ? String.fromCodePoint(Number(e.slice(1))) : ENTITIES[e] ?? m));
+
 const decode = (data) => Buffer.from(data, 'base64url').toString();
 
 export function bodyText(payload) {

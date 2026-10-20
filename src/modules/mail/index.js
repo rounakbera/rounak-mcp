@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { account, DESTRUCTIVE, READ, WRITE } from '../../tools.js';
-import { bodyText, header, parts, rawMessage } from './mime.js';
+import { bodyText, header, parts, rawMessage, unescapeHtml } from './mime.js';
 
 const MAX_BODY_CHARS = 20_000;
 
@@ -67,7 +67,7 @@ export default {
                   subject: header(messages[0], 'Subject'),
                   from: header(last, 'From'),
                   date: header(last, 'Date'),
-                  snippet: last.snippet,
+                  snippet: unescapeHtml(last.snippet),
                   messages: messages.length,
                   labels: last.labelIds,
                 };

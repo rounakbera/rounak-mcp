@@ -50,7 +50,7 @@ export async function setup() {
   const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [] };
   ctx.google.mailbox(OWNER).threads.push({
     id: 't1',
-    messages: [gmailMessage({ id: 'm1', threadId: 't1', from: 'Alice <alice@example.com>', subject: 'Your invoice', body: 'invoice attached' })],
+    messages: [gmailMessage({ id: 'm1', threadId: 't1', from: 'Alice <alice@example.com>', subject: 'Your invoice', body: 'invoice attached', snippet: 'invoice attached &amp; it&#39;s &#8212; here' })],
   });
   ctx.google.mailbox(WORK).threads.push({
     id: 'w1',

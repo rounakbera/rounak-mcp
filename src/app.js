@@ -26,6 +26,16 @@ export function createApp(config, { googleEndpoints } = {}) {
   // cloudflared connects from loopback; trust its X-Forwarded-For so rate limits apply per real client.
   app.set('trust proxy', 'loopback');
 
+  // Access log without query strings, which carry OAuth codes and state.
+  app.use((req, res, next) => {
+    res.on('finish', () => {
+      const rpc = [req.body].flat().map((m) => m?.method).filter(Boolean).join(',');
+      const version = req.headers['mcp-protocol-version'];
+      console.log([req.method, req.originalUrl.split('?')[0], res.statusCode, rpc, version && `v${version}`].filter(Boolean).join(' '));
+    });
+    next();
+  });
+
   app.use((req, res, next) => {
     // Only serve the public hostname: blocks DNS rebinding and anything not routed via the tunnel.
     if (req.headers.host !== config.publicUrl.host) return res.status(421).end();
