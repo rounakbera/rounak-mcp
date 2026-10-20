@@ -28,6 +28,7 @@ export function loadConfig(env = process.env) {
   return {
     publicUrl,
     port: Number(env.PORT || 8787),
+    linkPort: Number(env.LINK_PORT || 8788),
     ownerEmail: env.OWNER_EMAIL.toLowerCase(),
     googleClientId: env.GOOGLE_CLIENT_ID,
     googleClientSecret: env.GOOGLE_CLIENT_SECRET,

@@ -11,11 +11,33 @@ Claude (phone/web) → claude.ai → https://mail-mcp.<domain> → Cloudflare �
 Dependencies: `@modelcontextprotocol/sdk`, plus `express` and `zod`, which the SDK already pulls in.
 Google OAuth and Gmail are called with plain `fetch`.
 
+## Layout
+
+```
+src/
+  main.js      server entry point: listens on 127.0.0.1
+  link.js      `npm run link` CLI: link/unlink Gmail accounts via a localhost redirect
+  app.js       Express app: host check, security headers, OAuth router, /mcp
+  oauth.js     OAuth 2.1 provider for claude.ai, with owner-only Google sign-in
+  google.js    Google OAuth + Gmail REST client
+  tools.js     MCP tools
+  mime.js      Gmail message parsing and MIME building
+  config.js    env parsing and validation
+  store.js     encrypted state file
+test/
+  helpers/             fake-google.js (the only mock), harness.js
+  *.test.js            security, accounts, mail, persistence
+deploy/                systemd user units + install.sh
+```
+
 ## Tools
 
-`list_accounts`, `link_account`, `unlink_account`, `search_threads` (across all accounts by default),
-`get_thread`, `send_email` (also handles replies), `create_draft`, `list_labels`, `modify_thread`
-(archive, read, star, labels), `trash_thread`.
+`list_accounts`, `search_threads` (across all accounts by default), `get_thread`, `send_email`
+(also handles replies), `create_draft`, `list_labels`, `modify_thread` (archive, read, star, labels),
+`trash_thread`.
+
+Accounts are linked and unlinked only on this machine, with `npm run link` and
+`npm run link -- --remove <email>`, never through the public server.
 
 ## Configuration
 
@@ -37,8 +59,8 @@ start while any value is still `REPLACE_ME`.
   registration is turned off.
 - Redirects are allowed only to claude.ai's callback. PKCE (S256) is required, both for Claude
   connecting to this server and for this server signing in to Google.
-- You sign in with Google, and only `OWNER_EMAIL` is accepted. Any other account gets a `403`, and
-  its Google grant is revoked right away.
+- You sign in with Google, and only `OWNER_EMAIL` is accepted; any other account gets a `403`. This
+  sign-in asks only for `openid email`. Gmail access is granted separately, through `npm run link`.
 - Codes and states are single-use and expire after 10 minutes. Access tokens last 1 hour and live
   only in memory. Refresh tokens last 30 days and rotate on every use. All of them are stored only
   as SHA-256 hashes.
@@ -62,8 +84,9 @@ start while any value is still `REPLACE_ME`.
 2. In the OAuth consent screen, choose External. Then set the **publishing status to "In production"**.
    If you leave it in Testing, Google expires refresh tokens after 7 days. You'll see an "unverified
    app" warning when you sign in; that's expected for a personal app.
-3. Create an OAuth client of type **Web application** with this authorized redirect URI:
-   `https://mail-mcp.<domain>/oauth/google/callback`.
+3. Create an OAuth client of type **Web application** with two authorized redirect URIs:
+   - `https://mail-mcp.<domain>/oauth/google/callback` (connector sign-in)
+   - `http://localhost:<LINK_PORT>/callback` (`npm run link`; default port 8788)
 
 ### 2. Cloudflare Tunnel (browser)
 1. Go to Zero Trust → Networks → Tunnels → **Create a tunnel** (Cloudflared).
@@ -89,6 +112,7 @@ sudo apt install cloudflared   # https://pkg.cloudflare.com/
 npm install
 $EDITOR .env                   # replace every REPLACE_ME (generation commands are inline)
 npm test
+npm run link                   # once per Gmail account; open the printed URL on this machine
 ./deploy/install.sh            # systemd user units for the server + tunnel
 sudo loginctl enable-linger $USER
 ```
@@ -102,12 +126,11 @@ Go to Settings → Connectors → **Add custom connector**:
 - URL: `https://mail-mcp.<domain>/mcp`
 - Advanced settings: enter `MCP_CLIENT_ID` and `MCP_CLIENT_SECRET`
 
-Sign in with `OWNER_EMAIL`; that account is linked automatically. To add another account, ask Claude
-to "link another Gmail account" and open the one-time URL it gives you. The connector then works in
-the Claude mobile app as well.
+Sign in with `OWNER_EMAIL` once. The connector then works in the Claude mobile app too, and claude.ai
+refreshes its token in the background.
 
 ## Tests
 
 `npm test` runs end-to-end tests. They start the real app and connect with the real MCP SDK client,
-going through the whole OAuth flow. The only fake is `test/fake-google.js`, a local HTTP server that
+going through the whole OAuth flow and the `npm run link` flow. The only fake is `test/helpers/fake-google.js`, a local HTTP server that
 stands in for Google OAuth and the Gmail API.

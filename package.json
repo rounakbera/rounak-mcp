@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env src/main.js",
+    "link": "node --env-file=.env src/link.js",
     "test": "node --test test/*.test.js",
     "prepare": "git config core.hooksPath .githooks"
   },
