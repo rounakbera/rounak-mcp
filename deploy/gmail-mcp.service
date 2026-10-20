@@ -1,0 +1,17 @@
+[Unit]
+Description=Gmail MCP server
+After=network-online.target
+
+[Service]
+WorkingDirectory=@DIR@
+EnvironmentFile=@DIR@/.env
+# The tunnel token is cloudflared's business only.
+UnsetEnvironment=TUNNEL_TOKEN
+Environment=NODE_ENV=production
+ExecStart=@NODE@ src/main.js
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

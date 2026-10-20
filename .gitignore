@@ -1,0 +1,6 @@
+# Secrets: NEVER commit. Only .env.example (placeholders) is tracked.
+.env
+.env.*
+!.env.example
+data/
+node_modules/

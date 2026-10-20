@@ -1,0 +1,16 @@
+#!/bin/sh
+# Refuse to commit secrets. Installed via `npm install` (sets core.hooksPath).
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+bad=$(printf '%s\n' "$staged" | grep -E '(^|/)(\.env(\..*)?|data/.*)$' | grep -vE '(^|/)\.env\.example$')
+if [ -n "$bad" ]; then
+  echo "pre-commit: refusing to commit secret files:" >&2
+  printf '  %s\n' $bad >&2
+  exit 1
+fi
+
+# Google client secrets (GOCSPX-), Cloudflare tunnel tokens (base64 JSON starting {"a":), private keys.
+if git diff --cached -U0 -- . ':!.githooks/pre-commit' | grep -E '^\+' | grep -qE 'GOCSPX-|eyJhIjoi|-----BEGIN [A-Z ]*PRIVATE KEY'; then
+  echo "pre-commit: staged changes look like they contain a secret." >&2
+  exit 1
+fi
