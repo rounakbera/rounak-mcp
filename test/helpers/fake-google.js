@@ -1,4 +1,4 @@
-// A real HTTP server standing in for Google OAuth + the Gmail API. The only mock in the test suite.
+// A real HTTP server standing in for Google OAuth + the Gmail and Calendar APIs. The only mock in the test suite.
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -26,6 +26,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   const state = {
     nextLogin: null, // email the next sign-in succeeds as
     mailboxes: new Map(), // email -> { threads, sent, drafts }
+    calendars: new Map(), // email -> { calendars, events: { calendarId: [event] }, writes }
     codes: new Map(),
     accessTokens: new Map(), // token -> email
     refreshTokens: new Map(), // token -> email
@@ -34,6 +35,10 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   const mailbox = (email) => {
     if (!state.mailboxes.has(email)) state.mailboxes.set(email, { threads: [], sent: [], drafts: [] });
     return state.mailboxes.get(email);
+  };
+  const calendar = (email) => {
+    if (!state.calendars.has(email)) state.calendars.set(email, { calendars: [], events: {}, writes: [] });
+    return state.calendars.get(email);
   };
   const issueAccess = (email) => {
     const token = `at-${randomUUID()}`;
@@ -88,6 +93,75 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     }],
   ];
 
+  // Calendar: `primary` aliases the primary calendar; unknown calendars and events are 404s.
+  const NOT_FOUND = [404, { error: { message: 'Not Found' } }];
+  const calOf = (acct, id) => acct.calendars.find((c) => c.id === decodeURIComponent(id) || (c.primary && id === 'primary'));
+  const eventsOf = (acct, id) => {
+    const c = calOf(acct, id);
+    return c && (acct.events[c.id] ??= []);
+  };
+  const ms = (t) => Date.parse(t.dateTime ?? t.date);
+  const withEvent = (fn) => (acct, m, ctx) => {
+    const list = eventsOf(acct, m[1]);
+    const e = list?.find((x) => x.id === decodeURIComponent(m[2]));
+    return e ? fn(e, list, acct, ctx) : NOT_FOUND;
+  };
+  const logWrite = (acct, method, { query, json }) => acct.writes.push({ method, query: Object.fromEntries(query), json });
+  const calendarRoutes = [
+    ['GET', /^\/users\/me\/calendarList$/, (acct) => [200, { items: acct.calendars }]],
+    ['GET', /^\/calendars\/([^/]+)\/events$/, (acct, m, { query }) => {
+      const list = eventsOf(acct, m[1]);
+      if (!list) return NOT_FOUND;
+      const [min, max, q] = [Date.parse(query.get('timeMin')), Date.parse(query.get('timeMax')), query.get('q')];
+      const items = list
+        .filter((e) => ms(e.end) > min && ms(e.start) < max && (!q || e.summary.includes(q)))
+        .sort((a, b) => ms(a.start) - ms(b.start))
+        .slice(0, Number(query.get('maxResults')));
+      return [200, { items, timeZone: calOf(acct, m[1]).timeZone }];
+    }],
+    ['GET', /^\/calendars\/([^/]+)\/events\/([^/]+)$/, withEvent((e) => e)],
+    ['POST', /^\/calendars\/([^/]+)\/events$/, (acct, m, ctx) => {
+      const list = eventsOf(acct, m[1]);
+      if (!list) return NOT_FOUND;
+      logWrite(acct, 'POST', ctx);
+      const e = { id: `ev-${randomUUID()}`, status: 'confirmed', ...ctx.json, ...(ctx.json.conferenceData && { hangoutLink: 'https://meet.google.com/abc-defg-hij' }) };
+      list.push(e);
+      return e;
+    }],
+    ['PATCH', /^\/calendars\/([^/]+)\/events\/([^/]+)$/, withEvent((e, _list, acct, ctx) => {
+      logWrite(acct, 'PATCH', ctx);
+      // With attendeesOmitted, the attendees sent are merged into the list by email.
+      const { attendeesOmitted, ...patch } = ctx.json;
+      if (attendeesOmitted) {
+        patch.attendees = (e.attendees ?? []).map((a) => ({ ...a, ...patch.attendees.find((p) => p.email === a.email) }));
+      }
+      return Object.assign(e, patch);
+    })],
+    ['DELETE', /^\/calendars\/([^/]+)\/events\/([^/]+)$/, withEvent((e, list, acct, ctx) => {
+      logWrite(acct, 'DELETE', ctx);
+      list.splice(list.indexOf(e), 1);
+      return [200, {}];
+    })],
+    ['POST', /^\/freeBusy$/, (acct, _m, { json }) => {
+      const [min, max] = [Date.parse(json.timeMin), Date.parse(json.timeMax)];
+      const calendars = Object.fromEntries(
+        json.items.map(({ id }) => {
+          const list = eventsOf(acct, id);
+          if (!list) return [id, { errors: [{ domain: 'global', reason: 'notFound' }] }];
+          const busy = list
+            .filter((e) => ms(e.end) > min && ms(e.start) < max)
+            .map((e) => ({ start: new Date(Math.max(ms(e.start), min)).toISOString(), end: new Date(Math.min(ms(e.end), max)).toISOString() }));
+          return [id, { busy }];
+        }),
+      );
+      return [200, { calendars }];
+    }],
+  ];
+  const apis = [
+    [/^\/gmail\/v1\/users\/me(\/.*)$/, gmailRoutes, mailbox],
+    [/^\/calendar\/v3(\/.*)$/, calendarRoutes, calendar],
+  ];
+
   const server = createServer(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
@@ -95,13 +169,14 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     const ctx = { query: url.searchParams, form: new URLSearchParams(body), json: body && req.headers['content-type'] === 'application/json' ? JSON.parse(body) : {} };
 
     let result = routes[`${req.method} ${url.pathname}`]?.(ctx);
-    const gmailPath = url.pathname.match(/^\/gmail\/v1\/users\/me(\/.*)$/)?.[1];
-    if (gmailPath) {
+    for (const [prefix, apiRoutes, data] of apis) {
+      const path = url.pathname.match(prefix)?.[1];
+      if (!path) continue;
       const email = state.accessTokens.get(req.headers.authorization?.replace('Bearer ', ''));
-      for (const [method, re, handler] of gmailRoutes) {
-        const m = req.method === method && gmailPath.match(re);
+      for (const [method, re, handler] of apiRoutes) {
+        const m = req.method === method && path.match(re);
         if (!m) continue;
-        result = email ? handler(mailbox(email), m, ctx) : [401, { error: { message: 'Invalid Credentials' } }];
+        result = email ? handler(data(email), m, ctx) : [401, { error: { message: 'Invalid Credentials' } }];
         break;
       }
       if (result && !Array.isArray(result)) result = [200, result];
@@ -116,7 +191,14 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   return {
     state,
     mailbox,
-    endpoints: { authUrl: `${base}/auth`, tokenUrl: `${base}/token`, revokeUrl: `${base}/revoke`, gmail: `${base}/gmail/v1/users/me` },
+    calendar,
+    endpoints: {
+      authUrl: `${base}/auth`,
+      tokenUrl: `${base}/token`,
+      revokeUrl: `${base}/revoke`,
+      gmail: `${base}/gmail/v1/users/me`,
+      calendar: `${base}/calendar/v3`,
+    },
     close: () => new Promise((r) => server.close(r)),
   };
 }

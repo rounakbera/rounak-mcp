@@ -2,7 +2,7 @@
   "name": "rounak-mcp",
   "version": "1.0.0",
   "private": true,
-  "description": "Self-hosted, modular MCP server for claude.ai, starting with multi-account Gmail",
+  "description": "Self-hosted, modular MCP server for claude.ai, with multi-account Gmail and Google Calendar",
   "type": "module",
   "engines": {
     "node": ">=22"

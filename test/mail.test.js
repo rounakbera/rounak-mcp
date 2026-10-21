@@ -47,6 +47,14 @@ describe('mail', () => {
     assert.equal(ctx.google.mailbox(OWNER).sent.length, 1);
   });
 
+  test('rejects IDs that would change the request path', async () => {
+    for (const thread_id of ['..', '.', '']) {
+      await assert.rejects(call(client, 'mail_trash_thread', { account: OWNER, thread_id }), /non-empty ID/);
+    }
+    const args = { account: OWNER, reply_to_message_id: '..', body: 'x' };
+    await assert.rejects(call(client, 'mail_create_draft', args), /non-empty ID/);
+  });
+
   test('creates a draft with a UTF-8 subject', async () => {
     await call(client, 'mail_create_draft', { account: WORK, to: 'bob@corp.example', subject: 'Café ☕', body: 'draft' });
     const mime = decodeRaw(ctx.google.mailbox(WORK).drafts[0].message.raw);

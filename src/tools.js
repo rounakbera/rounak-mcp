@@ -5,9 +5,12 @@ export const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHin
 export const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 
 export const account = z.string().optional().describe('Google account email to use; optional when only one is linked');
+// A Google resource ID placed in a URL path. encodeURIComponent leaves "." and "..", which would
+// move the request to a different endpoint.
+export const id = z.string().regex(/^(?!\.\.?$)./, 'Must be a non-empty ID other than "." or ".."');
 
 // Registers the core tools, then each enabled module's tools.
-export function registerTools(server, { store, google, modules }) {
+export function registerTools(server, { store, google, modules, config }) {
   const linked = () => Object.keys(store.read().accounts);
 
   // Maps an optional `account` argument to a linked account's email.
@@ -26,6 +29,22 @@ export function registerTools(server, { store, google, modules }) {
       content: [{ type: 'text', text: JSON.stringify(await handler(args), null, 2) }],
     }));
 
+  // Accounts linked before scopes were recorded have none stored; Google decides for those.
+  const granted = (email, scopes) => {
+    const have = store.read().accounts[email]?.scopes;
+    return !have || scopes.every((s) => have.includes(s));
+  };
+
   tool('list_accounts', 'List linked Google accounts', {}, READ, () => linked());
-  for (const m of modules) m.register({ google, linked, resolve, tool });
+  for (const m of modules) {
+    // An account missing the module's scopes is an error, never silently left out of results.
+    const check = (emails) => {
+      const missing = emails.filter((email) => !granted(email, m.scopes));
+      if (missing.length) throw new Error(`Re-link ${missing.join(', ')} with \`npm run link\` to grant ${m.name} access`);
+      return emails;
+    };
+    const mLinked = () => check(linked());
+    const mResolve = (email) => check([resolve(email)])[0];
+    m.register({ google, linked: mLinked, resolve: mResolve, tool, config });
+  }
 }

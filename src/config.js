@@ -30,6 +30,7 @@ export function loadConfig(env = process.env) {
     port: Number(env.PORT || 8787),
     linkPort: Number(env.LINK_PORT || 8788),
     modules: (env.MODULES || 'mail').split(',').map((m) => m.trim()),
+    calendarIds: env.CALENDAR_IDS ? env.CALENDAR_IDS.split(',').map((c) => c.trim()).filter(Boolean) : null,
     ownerEmail: env.OWNER_EMAIL.toLowerCase(),
     googleClientId: env.GOOGLE_CLIENT_ID,
     googleClientSecret: env.GOOGLE_CLIENT_SECRET,

@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { account, DESTRUCTIVE, READ, WRITE } from '../../tools.js';
+import { account, DESTRUCTIVE, id, READ, WRITE } from '../../tools.js';
 import { bodyText, header, parts, rawMessage, unescapeHtml } from './mime.js';
 
 const MAX_BODY_CHARS = 20_000;
 
-const threadId = z.string();
+const threadId = id;
 const composeArgs = {
   account,
   to: z.string().optional().describe('Comma-separated recipients; defaults to the original sender when replying'),
@@ -12,7 +12,7 @@ const composeArgs = {
   bcc: z.string().optional(),
   subject: z.string().optional().describe('Defaults to "Re: <original subject>" when replying'),
   body: z.string().describe('Plain-text body'),
-  reply_to_message_id: z.string().optional().describe('Message ID to reply to; keeps the reply in its thread'),
+  reply_to_message_id: id.optional().describe('Message ID to reply to; keeps the reply in its thread'),
 };
 
 export default {
