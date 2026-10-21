@@ -145,7 +145,8 @@ server won't start while any value is still `REPLACE_ME`.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at
   startup) from a fixed google.com URL, never a URL from tool input. Responses are capped at 10 MB
   with a 10-second timeout, and the list owner's name and account ID in them are dropped. Anyone
-  with a list's share link can see that list.
+  with a list's share link can see that list. Place names, notes and list names reach Claude as
+  data, and whoever owns a list can change them, so only add lists you own or trust.
 
 **Secrets**
 - `.env` and `data/` are git-ignored. A pre-commit hook (`.githooks/`, turned on by `npm install`)

@@ -30,8 +30,14 @@ async function readCapped(res) {
 }
 
 // Keeps only the list's name and places. The response also names the list's owner, which is dropped.
+// JSON.parse errors quote the body, so they're replaced rather than passed on.
 function parse(id, text) {
-  const [list] = JSON.parse(text.replace(/^\)\]\}'\n/, ''));
+  let list;
+  try {
+    [list] = JSON.parse(text.replace(/^\)\]\}'\n/, ''));
+  } catch {
+    throw new Error('unexpected response format');
+  }
   const items = list?.[8] ?? [];
   if (typeof list?.[4] !== 'string' || !Array.isArray(items)) throw new Error('unexpected response format');
   const places = items.map((p) => {

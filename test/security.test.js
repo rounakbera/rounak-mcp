@@ -75,9 +75,10 @@ describe('security', () => {
 describe('maps security', () => {
   let ctx, client;
   before(async () => {
-    ctx = await setup({ mapsListIds: ['huge-list', 'changed-list'] });
+    ctx = await setup({ mapsListIds: ['huge-list', 'changed-list', 'html-list'] });
     ctx.google.state.mapsLists.set('huge-list', `)]}'\n[${' '.repeat(11_000_000)}]`);
     ctx.google.state.mapsLists.set('changed-list', `)]}'\n[{"places":[]}]`);
+    ctx.google.state.mapsLists.set('html-list', '<!doctype html><title>Before you continue</title>');
     client = await connect(ctx, (await signInAndGetTokens(ctx)).access_token);
   });
   after(() => ctx.teardown());
@@ -103,5 +104,7 @@ describe('maps security', () => {
   test('refuses oversized responses and fails loudly when the format changes', async () => {
     await assert.rejects(call(client, 'maps_search_saved', { lists: ['huge-list'] }), /huge-list: response too large/);
     await assert.rejects(call(client, 'maps_search_saved', { lists: ['changed-list'] }), /changed-list: unexpected response format/);
+    // Parse errors would otherwise quote the start of the body.
+    await assert.rejects(call(client, 'maps_search_saved', { lists: ['html-list'] }), (e) => /html-list: unexpected response format$/.test(e.message));
   });
 });
