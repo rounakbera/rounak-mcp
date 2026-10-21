@@ -49,6 +49,9 @@ npm run link       # link a Google account (host machine only)
   Say why it's needed in the PR description.
 - Commit `package-lock.json`. Use `npm ci` in automation.
 - GitHub Actions are pinned to full commit SHAs.
+- Dependabot opens security-fix PRs only. Patch and minor ones auto-merge once CI passes; majors and
+  maintainer changes wait for manual review. Merging never deploys: the host only updates when you
+  pull and restart, so check what changed first.
 
 ## Code and tests
 
