@@ -35,3 +35,27 @@ describe('accounts (npm run link)', () => {
     assert.ok(![...ctx.google.state.refreshTokens.values()].includes(WORK));
   });
 });
+
+describe('granted scopes', () => {
+  let ctx, client;
+  before(async () => {
+    ctx = await setup();
+    await link(ctx, OWNER);
+    await link(ctx, WORK, ['mail']);
+    client = await connect(ctx, (await signInAndGetTokens(ctx)).access_token);
+  });
+  after(() => ctx.teardown());
+
+  test('records granted scopes; modules skip accounts that lack theirs', async () => {
+    assert.deepEqual(cli(ctx).store.read().accounts[WORK].scopes, ['openid', 'email', 'https://www.googleapis.com/auth/gmail.modify']);
+    await assert.rejects(call(client, 'calendar_list_calendars', { account: WORK }), /work@example\.com hasn't granted calendar access; run `npm run link`/);
+    assert.ok(Array.isArray(await call(client, 'mail_list_labels', { account: WORK })));
+    ctx.google.calendar(OWNER).calendars.push({ id: OWNER, primary: true, selected: true });
+    assert.deepEqual((await call(client, 'calendar_list_calendars')).map((c) => c.account), [OWNER]);
+  });
+
+  test('accounts linked before scopes were recorded are left to Google', async () => {
+    cli(ctx).store.update(({ accounts }) => delete accounts[WORK].scopes);
+    assert.deepEqual(await call(client, 'calendar_list_calendars', { account: WORK }), []);
+  });
+});

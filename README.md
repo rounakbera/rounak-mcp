@@ -2,7 +2,7 @@
 
 A self-hosted, modular MCP server for claude.ai (web, desktop and mobile). It runs on your own
 machine and is reachable only through a Cloudflare Tunnel on your own domain. It works with multiple
-Google accounts. The first module is **mail** (Gmail).
+Google accounts. The modules are **mail** (Gmail) and **calendar** (Google Calendar).
 
 ```
 Claude (phone/desktop/web) → claude.ai → https://mcp.<domain> → Cloudflare → tunnel (outbound-only)
@@ -27,9 +27,10 @@ src/
   modules/
     index.js         module registry
     mail/            Gmail tools (index.js) and MIME handling (mime.js)
+    calendar/        Google Calendar tools
 test/
   helpers/           fake-google.js (the only mock), harness.js
-  *.test.js          security, accounts, mail, persistence
+  *.test.js          security, accounts, mail, calendar, persistence
 deploy/              systemd user units, install.sh, hourly update.sh
 ```
 
@@ -39,6 +40,14 @@ deploy/              systemd user units, install.sh, hourly update.sh
 - **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread`,
   `mail_send_email` (also handles replies), `mail_create_draft`, `mail_list_labels`,
   `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`
+- **calendar:** `calendar_list_calendars`, `calendar_list_events` (merges calendars across all
+  accounts by default), `calendar_get_event`, `calendar_create_event`, `calendar_update_event`,
+  `calendar_delete_event`, `calendar_respond_to_event`, `calendar_find_free_time`
+
+Calendar tools read each account's *default* calendars unless given an `account` or `calendar_ids`
+(`"primary"` means each account's main calendar). By default those are the calendars shown in Google
+Calendar. Set `CALENDAR_IDS` in `.env` to choose them yourself; IDs come from `calendar_list_calendars`.
+Times are ISO 8601 with an offset, or `YYYY-MM-DD` for all-day events.
 
 Accounts are linked and unlinked only on the host machine, with `npm run link` and
 `npm run link -- --remove <email>`, never through the public server.
@@ -49,20 +58,24 @@ A module is a folder in `src/modules/` whose `index.js` default-exports two thin
 
 ```js
 export default {
-  scopes: ['https://www.googleapis.com/auth/calendar'], // Google scopes it needs
-  register({ google, linked, resolve, tool }) {
-    tool('calendar_list_events', 'List upcoming events', { account }, READ, async (args) => {
+  scopes: ['https://www.googleapis.com/auth/tasks.readonly'], // Google scopes it needs
+  register({ google, linked, resolve, tool, config }) {
+    tool('tasks_list_lists', 'List task lists', { account }, READ, async (args) => {
       const email = resolve(args.account);
-      return google.request(email, 'GET', `${google.endpoints.calendar}/calendars/primary/events`);
+      return google.request(email, 'GET', `${google.endpoints.tasks}/users/@me/lists`);
     });
   },
 };
 ```
 
+`linked()` and `resolve()` only return accounts that granted the module's scopes. `npm run link`
+records each account's granted scopes, so a tool called on an account that's missing them says to
+re-link it. Accounts linked before scopes were recorded count as granted, and Google has the final say.
+
 To add one:
 1. Register it in `src/modules/index.js`.
 2. If it calls a new Google API, add that API's base URL to `GOOGLE_ENDPOINTS` in `src/google.js`.
-3. Turn it on with `MODULES=mail,calendar` in `.env`.
+3. Turn it on with `MODULES=mail,calendar,tasks` in `.env`.
 4. Run `npm run link` again for each account, so the account grants the new scopes.
 
 Prefix each tool name with the module name.
@@ -99,7 +112,14 @@ server won't start while any value is still `REPLACE_ME`.
 - Linked accounts' Google refresh tokens live in `$DATA_DIR/state.enc` (AES-256-GCM, file mode `0600`).
 - The mail module's scope is `gmail.modify`: read, send, label and trash, but no permanent delete and
   no settings changes.
-- Sending and trashing are marked `destructiveHint`, so Claude asks before doing them.
+- The calendar module's scopes are `calendar.events`, `calendar.calendarlist.readonly` and
+  `calendar.freebusy`: it can read and edit events, but it can't create, delete or share calendars.
+  Inviting attendees shares an event's details with them; `send_updates` only controls whether
+  they're also emailed.
+- Sending, trashing, and creating, changing or deleting events are marked `destructiveHint`, so
+  Claude asks before doing them.
+- IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
+  call can't move its request to a different endpoint.
 
 **Secrets**
 - `.env` and `data/` are git-ignored. A pre-commit hook (`.githooks/`, turned on by `npm install`)
@@ -113,7 +133,8 @@ See [AGENTS.md](AGENTS.md): branch, open a PR, pass CI, squash merge.
 ## Setup
 
 ### 1. Google Cloud (browser, once)
-1. Create a project and enable the API for each module you'll use (mail: **Gmail API**).
+1. Create a project and enable the API for each module you'll use (mail: **Gmail API**;
+   calendar: **Google Calendar API**).
 2. In the OAuth consent screen, choose External. Then set the **publishing status to "In production"**.
    If you leave it in Testing, Google expires refresh tokens after 7 days. You'll see an "unverified
    app" warning when you sign in; that's expected for a personal app.

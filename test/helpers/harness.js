@@ -22,6 +22,7 @@ export const REDIRECT = CLAUDE_REDIRECT_URIS[0];
 const GOOGLE = { clientId: 'google-client-id', clientSecret: 'google-client-secret' };
 const CLIENT = { id: 'claude-connector', secret: randomBytes(32).toString('base64url') };
 const KEY = randomBytes(32);
+const MODULES = ['mail', 'calendar'];
 
 export const decodeRaw = (raw) => Buffer.from(raw, 'base64url').toString();
 
@@ -39,15 +40,17 @@ export async function startApp(ctx) {
     redirectUris: CLAUDE_REDIRECT_URIS,
     encryptionKey: KEY,
     dataDir: ctx.dataDir,
-    modules: ['mail'],
+    modules: MODULES,
+    calendarIds: ctx.calendarIds ?? null,
   };
   server.on('request', createApp(config, { googleEndpoints: ctx.google.endpoints }));
   ctx.app = { base: config.publicUrl, port, close: () => (server.closeAllConnections(), server.close()) };
 }
 
 // Fresh data dir, fake Google with one seeded thread per account, and a running app.
-export async function setup() {
-  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [] };
+// `calendarIds` stands in for CALENDAR_IDS.
+export async function setup({ calendarIds } = {}) {
+  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [], calendarIds };
   ctx.google.mailbox(OWNER).threads.push({
     id: 't1',
     messages: [gmailMessage({ id: 'm1', threadId: 't1', from: 'Alice <alice@example.com>', subject: 'Your invoice', body: 'invoice attached', snippet: 'invoice attached &amp; it&#39;s &#8212; here' })],
@@ -72,8 +75,9 @@ export function cli(ctx) {
   return { store, google: new Google({ ...GOOGLE, endpoints: ctx.google.endpoints, store }) };
 }
 
-export async function link(ctx, email) {
-  const { url, linked } = await linkAccount({ ...cli(ctx), port: 0, scopes: scopesFor(loadModules(['mail'])) });
+// `modules` are the ones the account grants scopes for.
+export async function link(ctx, email, modules = MODULES) {
+  const { url, linked } = await linkAccount({ ...cli(ctx), port: 0, scopes: scopesFor(loadModules(modules)) });
   ctx.google.state.nextLogin = email;
   const toCallback = await fetch(url, { redirect: 'manual' });
   const res = await fetch(toCallback.headers.get('location'));

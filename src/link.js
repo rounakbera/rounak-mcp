@@ -27,7 +27,7 @@ export async function linkAccount({ google, store, port, scopes }) {
       const granted = tokens.scope?.split(' ') ?? [];
       const missing = scopes.filter((s) => !granted.includes(s));
       if (missing.length || !tokens.refresh_token) throw new Error(`Access not granted: ${missing.join(', ') || 'offline'}`);
-      store.update(({ accounts }) => (accounts[email] = { refreshToken: tokens.refresh_token }));
+      store.update(({ accounts }) => (accounts[email] = { refreshToken: tokens.refresh_token, scopes: granted }));
       res.writeHead(200, { 'content-type': 'text/plain' }).end(`Linked ${email}. You can close this tab.`);
       finish.resolve(email);
     } catch (e) {
