@@ -108,8 +108,7 @@ server won't start while any value is still `REPLACE_ME`.
 
 ## Contributing
 
-See [AGENTS.md](AGENTS.md): branch, open a PR, pass CI, squash merge. Report vulnerabilities
-privately per [SECURITY.md](SECURITY.md).
+See [AGENTS.md](AGENTS.md): branch, open a PR, pass CI, squash merge.
 
 ## Setup
 
