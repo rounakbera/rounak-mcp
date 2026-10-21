@@ -37,13 +37,14 @@ export function registerTools(server, { store, google, modules, config }) {
 
   tool('list_accounts', 'List linked Google accounts', {}, READ, () => linked());
   for (const m of modules) {
-    // Each module only sees the accounts that granted its scopes.
-    const mLinked = () => linked().filter((email) => granted(email, m.scopes));
-    const mResolve = (email) => {
-      const resolved = resolve(email);
-      if (!granted(resolved, m.scopes)) throw new Error(`${resolved} hasn't granted ${m.name} access; run \`npm run link\` for it again`);
-      return resolved;
+    // An account missing the module's scopes is an error, never silently left out of results.
+    const check = (emails) => {
+      const missing = emails.filter((email) => !granted(email, m.scopes));
+      if (missing.length) throw new Error(`Re-link ${missing.join(', ')} with \`npm run link\` to grant ${m.name} access`);
+      return emails;
     };
+    const mLinked = () => check(linked());
+    const mResolve = (email) => check([resolve(email)])[0];
     m.register({ google, linked: mLinked, resolve: mResolve, tool, config });
   }
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { account, DESTRUCTIVE, id, READ, WRITE } from '../../tools.js';
+import { account, DESTRUCTIVE, id, READ } from '../../tools.js';
 
 const MAX_DESCRIPTION_CHARS = 5_000;
 const DAY = 86_400_000;
@@ -169,7 +169,7 @@ export default {
 
     tool(
       'calendar_update_event',
-      'Change fields of a calendar event; omitted fields are left as they are. `attendees` replaces the whole guest list.',
+      'Change fields of a calendar event; omitted fields are left as they are. `attendees` replaces the whole guest list, and new attendees can see the event\'s details even when send_updates is "none".',
       {
         event_id: id,
         calendar_id: calendarId,
@@ -197,9 +197,10 @@ export default {
 
     tool(
       'calendar_respond_to_event',
-      'Accept, decline or tentatively accept an event you were invited to',
+      'Accept, decline or tentatively accept an event you were invited to. The organizer sees the response.',
       { event_id: id, calendar_id: calendarId, account, response: z.enum(['accepted', 'declined', 'tentative']) },
-      WRITE,
+      // Destructive because the response leaves the account: the organizer can be anyone.
+      DESTRUCTIVE,
       async (args) => {
         const path = eventPath(args.calendar_id, args.event_id);
         const { attendees = [] } = await cal(args, 'GET', path);

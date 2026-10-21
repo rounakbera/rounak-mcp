@@ -86,10 +86,10 @@ describe('calendar', () => {
     assert.equal(ctx.google.calendar(OWNER).writes.length, 0);
   });
 
-  test('creating, changing and deleting events are marked destructive', async () => {
+  test('every calendar write is marked destructive', async () => {
     const { tools } = await client.listTools();
     const destructive = tools.filter((t) => t.name.startsWith('calendar_') && t.annotations.destructiveHint).map((t) => t.name);
-    assert.deepEqual(destructive.sort(), ['calendar_create_event', 'calendar_delete_event', 'calendar_update_event']);
+    assert.deepEqual(destructive.sort(), ['calendar_create_event', 'calendar_delete_event', 'calendar_respond_to_event', 'calendar_update_event']);
   });
 
   test('errors instead of skipping an account with no default calendars', async () => {

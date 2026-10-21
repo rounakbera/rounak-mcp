@@ -68,9 +68,9 @@ export default {
 };
 ```
 
-`linked()` and `resolve()` only return accounts that granted the module's scopes. `npm run link`
-records each account's granted scopes, so a tool called on an account that's missing them says to
-re-link it. Accounts linked before scopes were recorded count as granted, and Google has the final say.
+`npm run link` records each account's granted scopes. If an account is missing the module's scopes,
+`linked()` and `resolve()` throw an error saying to re-link it, so it's never silently left out of
+results. Accounts linked before scopes were recorded count as granted, and Google has the final say.
 
 To add one:
 1. Register it in `src/modules/index.js`.
@@ -116,8 +116,9 @@ server won't start while any value is still `REPLACE_ME`.
   `calendar.freebusy`: it can read and edit events, but it can't create, delete or share calendars.
   Inviting attendees shares an event's details with them; `send_updates` only controls whether
   they're also emailed.
-- Sending, trashing, and creating, changing or deleting events are marked `destructiveHint`, so
-  Claude asks before doing them.
+- Sending, trashing, and every calendar write (creating, changing, deleting and responding to
+  events) are marked `destructiveHint`, so Claude asks before doing them. Each of these can reach
+  people outside the account.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 
