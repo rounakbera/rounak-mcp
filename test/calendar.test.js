@@ -132,7 +132,8 @@ describe('calendar', () => {
 
   test('creates all-day events', async () => {
     const e = await call(client, 'calendar_create_event', { account: WORK, title: 'Offsite', start: '2026-11-02', end: '2026-11-04' });
-    assert.deepEqual([e.all_day, e.calendar_id], [true, 'primary']);
+    // "primary" comes back as the calendar's real ID, with its time zone, as in calendar_list_events.
+    assert.deepEqual([e.all_day, e.calendar_id, e.time_zone], [true, WORK, 'Europe/London']);
     assert.deepEqual(ctx.google.calendar(WORK).writes[0].json.end, { date: '2026-11-04' });
   });
 
@@ -153,11 +154,25 @@ describe('calendar', () => {
       duration_minutes: 30,
     });
     // Dentist 16:00-17:00 and standup 16:30-16:45 merge; soccer follows at 17:00.
-    assert.deepEqual(busy, [{ start: '2026-10-21T16:00:00.000Z', end: '2026-10-21T18:00:00.000Z' }]);
+    assert.deepEqual(busy, [{ start: '2026-10-21T16:00:00Z', end: '2026-10-21T18:00:00Z' }]);
     assert.deepEqual(free, [
-      { start: '2026-10-21T15:00:00.000Z', end: '2026-10-21T16:00:00.000Z' },
-      { start: '2026-10-21T18:00:00.000Z', end: '2026-10-21T19:00:00.000Z' },
+      { start: '2026-10-21T15:00:00Z', end: '2026-10-21T16:00:00Z' },
+      { start: '2026-10-21T18:00:00Z', end: '2026-10-21T19:00:00Z' },
     ]);
+  });
+
+  test('returns free time in the offset of time_min', async () => {
+    const { free, busy } = await call(client, 'calendar_find_free_time', {
+      time_min: '2026-10-21T08:00:00-07:00',
+      time_max: '2026-10-21T12:00:00-07:00',
+    });
+    assert.deepEqual(busy, [{ start: '2026-10-21T09:00:00-07:00', end: '2026-10-21T11:00:00-07:00' }]);
+    assert.deepEqual(free.map((f) => f.start), ['2026-10-21T08:00:00-07:00', '2026-10-21T11:00:00-07:00']);
+  });
+
+  test('reads an event with its calendar\'s real ID and time zone', async () => {
+    const e = await call(client, 'calendar_get_event', { account: OWNER, event_id: 'dentist' });
+    assert.deepEqual([e.calendar_id, e.time_zone], [OWNER, 'America/Los_Angeles']);
   });
 });
 

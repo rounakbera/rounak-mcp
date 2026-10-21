@@ -102,11 +102,13 @@ export default {
           .filter((p) => !q || [p.name, p.address, p.note].some((s) => s?.toLowerCase().includes(q)));
         if (args.near) {
           places = places
-            .map((p) => ({ ...p, distance_km: Math.round(km(args.near, p) * 10) / 10 }))
+            .map((p) => ({ ...p, distance_km: km(args.near, p) }))
             .filter((p) => !args.radius_km || p.distance_km <= args.radius_km)
             .sort((a, b) => a.distance_km - b.distance_km);
         }
-        return { total_matches: places.length, places: places.slice(0, args.max_results) };
+        // Rounded to 10 m only for output, so nearby places still read as different distances.
+        const round = (p) => (p.distance_km === undefined ? p : { ...p, distance_km: Math.round(p.distance_km * 100) / 100 });
+        return { total_matches: places.length, places: places.slice(0, args.max_results).map(round) };
       },
     );
   },
