@@ -22,7 +22,7 @@ export const REDIRECT = CLAUDE_REDIRECT_URIS[0];
 const GOOGLE = { clientId: 'google-client-id', clientSecret: 'google-client-secret' };
 const CLIENT = { id: 'claude-connector', secret: randomBytes(32).toString('base64url') };
 const KEY = randomBytes(32);
-const MODULES = ['mail', 'calendar'];
+const MODULES = ['mail', 'calendar', 'maps'];
 
 export const decodeRaw = (raw) => Buffer.from(raw, 'base64url').toString();
 
@@ -42,15 +42,16 @@ export async function startApp(ctx) {
     dataDir: ctx.dataDir,
     modules: MODULES,
     calendarIds: ctx.calendarIds ?? null,
+    mapsListIds: ctx.mapsListIds ?? [],
   };
   server.on('request', createApp(config, { googleEndpoints: ctx.google.endpoints }));
   ctx.app = { base: config.publicUrl, port, close: () => (server.closeAllConnections(), server.close()) };
 }
 
 // Fresh data dir, fake Google with one seeded thread per account, and a running app.
-// `calendarIds` stands in for CALENDAR_IDS.
-export async function setup({ calendarIds } = {}) {
-  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [], calendarIds };
+// `calendarIds` and `mapsListIds` stand in for CALENDAR_IDS and MAPS_LIST_IDS.
+export async function setup({ calendarIds, mapsListIds } = {}) {
+  const ctx = { dataDir: mkdtempSync(join(tmpdir(), 'rounak-mcp-')), google: await startFakeGoogle(GOOGLE), clients: [], calendarIds, mapsListIds };
   ctx.google.mailbox(OWNER).threads.push({
     id: 't1',
     messages: [gmailMessage({ id: 'm1', threadId: 't1', from: 'Alice <alice@example.com>', subject: 'Your invoice', body: 'invoice attached', snippet: 'invoice attached &amp; it&#39;s &#8212; here' })],

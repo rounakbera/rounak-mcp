@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { get } from 'node:http';
 import { after, before, describe, test } from 'node:test';
+import { loadConfig } from '../src/config.js';
 import { call, connect, OWNER, REDIRECT, setup, signIn, signInAndGetTokens, token } from './helpers/harness.js';
 
 describe('security', () => {
@@ -68,5 +69,39 @@ describe('security', () => {
     assert.equal(first.status, 200);
     assert.notEqual(first.body.refresh_token, tokens.refresh_token);
     assert.equal((await token(ctx, grant)).status, 400);
+  });
+});
+
+describe('maps security', () => {
+  let ctx, client;
+  before(async () => {
+    ctx = await setup({ mapsListIds: ['huge-list', 'changed-list'] });
+    ctx.google.state.mapsLists.set('huge-list', `)]}'\n[${' '.repeat(11_000_000)}]`);
+    ctx.google.state.mapsLists.set('changed-list', `)]}'\n[{"places":[]}]`);
+    client = await connect(ctx, (await signInAndGetTokens(ctx)).access_token);
+  });
+  after(() => ctx.teardown());
+
+  test('only accepts list IDs that cannot change the request', () => {
+    const env = {
+      PUBLIC_URL: 'https://mcp.example.com',
+      OWNER_EMAIL: OWNER,
+      GOOGLE_CLIENT_ID: 'id',
+      GOOGLE_CLIENT_SECRET: 'secret',
+      MCP_CLIENT_ID: 'id',
+      MCP_CLIENT_SECRET: 'x'.repeat(32),
+      ENCRYPTION_KEY: Buffer.alloc(32).toString('base64'),
+      MODULES: 'maps',
+    };
+    assert.deepEqual(loadConfig({ ...env, MAPS_LIST_IDS: 'abc_1-X, def' }).mapsListIds, ['abc_1-X', 'def']);
+    for (const ids of ['abc!2e9', 'abc&x=1', '../x']) {
+      assert.throws(() => loadConfig({ ...env, MAPS_LIST_IDS: ids }), /MAPS_LIST_IDS must be/);
+    }
+    assert.throws(() => loadConfig(env), /needs MAPS_LIST_IDS/);
+  });
+
+  test('refuses oversized responses and fails loudly when the format changes', async () => {
+    await assert.rejects(call(client, 'maps_search_saved', { lists: ['huge-list'] }), /huge-list: response too large/);
+    await assert.rejects(call(client, 'maps_search_saved', { lists: ['changed-list'] }), /changed-list: unexpected response format/);
   });
 });

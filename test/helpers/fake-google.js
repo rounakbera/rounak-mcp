@@ -1,4 +1,4 @@
-// A real HTTP server standing in for Google OAuth + the Gmail and Calendar APIs. The only mock in the test suite.
+// A real HTTP server standing in for Google OAuth, the Gmail and Calendar APIs, and shared Maps lists. The only mock in the test suite.
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 
@@ -22,6 +22,17 @@ export function gmailMessage({ id, threadId, from, subject, body, snippet = body
   };
 }
 
+// A shared Google Maps list as its endpoint returns it, owner details included. `cid` is signed, as Google sends it.
+export function mapsList(id, name, places) {
+  const owner = ['List Owner', 'https://example.com/avatar.png', '100000000000000000001'];
+  const items = places.map(({ name: n, note = '', address = '', lat, lng, cid }) => [
+    null,
+    [null, null, address && `${n}, ${address}`, null, address, [null, null, lat, lng], ['-1', cid]],
+    n, note, null, null, null, [], [[1], ['-1', cid]], [1792531684, 0], [1792531684, 0], null, owner,
+  ]);
+  return `)]}'\n${JSON.stringify([[[id, 1, [[1], [9]], 1, 1], 4, [2, 1, `https://www.google.com/maps/placelists/list/${id}`], owner, name, '', null, null, items]])}`;
+}
+
 export async function startFakeGoogle({ clientId, clientSecret }) {
   const state = {
     nextLogin: null, // email the next sign-in succeeds as
@@ -31,6 +42,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     accessTokens: new Map(), // token -> email
     refreshTokens: new Map(), // token -> email
     refreshGrants: 0,
+    mapsLists: new Map(), // list ID -> raw response body
   };
   const mailbox = (email) => {
     if (!state.mailboxes.has(email)) state.mailboxes.set(email, { threads: [], sent: [], drafts: [] });
@@ -71,6 +83,10 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
       const refresh = c.offline && `rt-${randomUUID()}`;
       if (refresh) state.refreshTokens.set(refresh, c.email);
       return [200, { access_token: issueAccess(c.email), expires_in: 3599, scope: c.scope, id_token: `e30.${b64url(JSON.stringify(claims))}.sig`, ...(refresh && { refresh_token: refresh }) }];
+    },
+    'GET /maps/preview/entitylist/getlist': ({ query }) => {
+      const body = state.mapsLists.get(query.get('pb')?.match(/^!1m4!1s([^!]+)!/)?.[1]);
+      return body === undefined ? [404, {}] : [200, body];
     },
     'POST /revoke': ({ form }) => {
       state.refreshTokens.delete(form.get('token'));
@@ -183,6 +199,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     }
     const [status, payload] = result ?? [404, { error: { message: 'Not Found' } }];
     if (status === 302) return res.writeHead(302, { location: payload }).end();
+    if (typeof payload === 'string') return res.writeHead(status, { 'content-type': 'application/json' }).end(payload);
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
   });
 
@@ -198,6 +215,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
       revokeUrl: `${base}/revoke`,
       gmail: `${base}/gmail/v1/users/me`,
       calendar: `${base}/calendar/v3`,
+      maps: `${base}/maps/preview/entitylist/getlist`,
     },
     close: () => new Promise((r) => server.close(r)),
   };
