@@ -104,6 +104,11 @@ server won't start while any value is still `REPLACE_ME`.
 **Secrets**
 - `.env` and `data/` are git-ignored. A pre-commit hook (`.githooks/`, turned on by `npm install`)
   also refuses to commit them, or anything that looks like a Google secret, tunnel token or private key.
+  CI repeats the tracked-file check, and GitHub secret scanning with push protection is turned on.
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md): branch, open a PR, pass CI, squash merge.
 
 ## Setup
 
