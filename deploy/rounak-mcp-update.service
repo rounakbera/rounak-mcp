@@ -1,0 +1,12 @@
+[Unit]
+Description=Deploy new commits on main to rounak-mcp
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DIR@
+# nvm's node/npm aren't on systemd's default PATH.
+Environment=PATH=@BIN@:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh @DIR@/deploy/update.sh
+UMask=0077
+NoNewPrivileges=true

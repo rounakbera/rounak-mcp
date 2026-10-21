@@ -30,7 +30,7 @@ src/
 test/
   helpers/           fake-google.js (the only mock), harness.js
   *.test.js          security, accounts, mail, persistence
-deploy/              systemd user units + install.sh
+deploy/              systemd user units, install.sh, hourly update.sh
 ```
 
 ## Tools
@@ -152,7 +152,13 @@ sudo loginctl enable-linger $USER
 WSL: to keep the VM running, set `vmIdleTimeout=-1` under `[wsl2]` in `%UserProfile%\.wslconfig`,
 and start WSL when Windows logs in.
 
-Logs: `journalctl --user -u rounak-mcp -u cloudflared-rounak-mcp -f`
+Logs: `journalctl --user -u rounak-mcp -u cloudflared-rounak-mcp -u rounak-mcp-update -f`
+
+**Auto-update:** a timer checks hourly for new commits on `main`. When it finds them, it
+fast-forwards, runs `npm ci` and `npm test`, and restarts the server; if tests fail, it rolls back.
+It skips while the checkout isn't a clean `main`, so local development is never touched. Run it now
+with `systemctl --user start rounak-mcp-update`. Changes to unit files in `deploy/` still need
+`./deploy/install.sh`.
 
 ### 4. claude.ai (once)
 Go to Settings → Connectors → **Add custom connector**:
