@@ -2,7 +2,8 @@
 
 A self-hosted, modular MCP server for claude.ai (web, desktop and mobile). It runs on your own
 machine and is reachable only through a Cloudflare Tunnel on your own domain. It works with multiple
-Google accounts. The modules are **mail** (Gmail) and **calendar** (Google Calendar).
+Google accounts. The modules are **mail** (Gmail), **calendar** (Google Calendar) and **maps**
+(saved Google Maps lists).
 
 ```
 Claude (phone/desktop/web) → claude.ai → https://mcp.<domain> → Cloudflare → tunnel (outbound-only)
@@ -28,9 +29,10 @@ src/
     index.js         module registry
     mail/            Gmail tools (index.js) and MIME handling (mime.js)
     calendar/        Google Calendar tools
+    maps/            saved Google Maps list tools
 test/
   helpers/           fake-google.js (the only mock), harness.js
-  *.test.js          security, accounts, mail, calendar, persistence
+  *.test.js          security, accounts, mail, calendar, maps, persistence
 deploy/              systemd user units, install.sh, hourly update.sh
 ```
 
@@ -48,6 +50,25 @@ Calendar tools read each account's *default* calendars unless given an `account`
 (`"primary"` means each account's main calendar). By default those are the calendars shown in Google
 Calendar. Set `CALENDAR_IDS` in `.env` to choose them yourself; IDs come from `calendar_list_calendars`.
 Times are ISO 8601 with an offset, or `YYYY-MM-DD` for all-day events.
+
+### Google Maps lists
+
+- **maps:** `maps_list_saved_lists`, `maps_search_saved` (by text, and by distance from a point)
+
+Google has no API for saved lists, so the maps module reads lists through their share links, using
+the same unauthenticated endpoint the shared-list page uses. It needs no Google account linking or
+API key, but it only sees lists shared as "Anyone with the link", and that format is undocumented:
+if Google changes it, the tools return an error until the parser is updated. Lists are cached for
+5 minutes.
+
+To add a list, share it in Google Maps and copy the link. Its ID is the part between `!2s` and the
+next `!` in the URL the link redirects to:
+
+```bash
+curl -sI https://maps.app.goo.gl/<code> | grep -io '!2s[^!]*' | cut -c4-
+```
+
+Put the IDs in `MAPS_LIST_IDS` in `.env` and add `maps` to `MODULES`.
 
 Accounts are linked and unlinked only on the host machine, with `npm run link` and
 `npm run link -- --remove <email>`, never through the public server.
@@ -121,6 +142,11 @@ server won't start while any value is still `REPLACE_ME`.
   people outside the account.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
+- The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at
+  startup) from a fixed google.com URL, never a URL from tool input. Responses are capped at 10 MB
+  with a 10-second timeout, and the list owner's name and account ID in them are dropped. Anyone
+  with a list's share link can see that list. Place names, notes and list names reach Claude as
+  data, and whoever owns a list can change them, so only add lists you own or trust.
 
 **Secrets**
 - `.env` and `data/` are git-ignored. A pre-commit hook (`.githooks/`, turned on by `npm install`)
@@ -135,7 +161,7 @@ See [AGENTS.md](AGENTS.md): branch, open a PR, pass CI, squash merge.
 
 ### 1. Google Cloud (browser, once)
 1. Create a project and enable the API for each module you'll use (mail: **Gmail API**;
-   calendar: **Google Calendar API**).
+   calendar: **Google Calendar API**; maps needs none).
 2. In the OAuth consent screen, choose External. Then set the **publishing status to "In production"**.
    If you leave it in Testing, Google expires refresh tokens after 7 days. You'll see an "unverified
    app" warning when you sign in; that's expected for a personal app.

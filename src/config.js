@@ -22,14 +22,22 @@ export function loadConfig(env = process.env) {
   if (encryptionKey.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes, base64-encoded');
   if (env.MCP_CLIENT_SECRET.length < 32) throw new Error('MCP_CLIENT_SECRET must be at least 32 characters');
 
+  // List IDs go into a URL parameter Google splits on "!", so allow only ID characters.
+  const mapsListIds = env.MAPS_LIST_IDS ? env.MAPS_LIST_IDS.split(',').map((id) => id.trim()).filter(Boolean) : [];
+  if (mapsListIds.some((id) => !/^[\w-]+$/.test(id))) throw new Error('MAPS_LIST_IDS must be comma-separated Google Maps list IDs');
+
   const publicUrl = new URL(env.PUBLIC_URL);
   if (publicUrl.protocol !== 'https:') throw new Error('PUBLIC_URL must be https');
+
+  const modules = (env.MODULES || 'mail').split(',').map((m) => m.trim());
+  if (modules.includes('maps') && !mapsListIds.length) throw new Error('The maps module needs MAPS_LIST_IDS');
 
   return {
     publicUrl,
     port: Number(env.PORT || 8787),
     linkPort: Number(env.LINK_PORT || 8788),
-    modules: (env.MODULES || 'mail').split(',').map((m) => m.trim()),
+    modules,
+    mapsListIds,
     calendarIds: env.CALENDAR_IDS ? env.CALENDAR_IDS.split(',').map((c) => c.trim()).filter(Boolean) : null,
     ownerEmail: env.OWNER_EMAIL.toLowerCase(),
     googleClientId: env.GOOGLE_CLIENT_ID,

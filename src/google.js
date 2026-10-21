@@ -5,6 +5,8 @@ export const GOOGLE_ENDPOINTS = {
   // API base URLs used by modules, keyed by module name.
   gmail: 'https://gmail.googleapis.com/gmail/v1/users/me',
   calendar: 'https://www.googleapis.com/calendar/v3',
+  // Unauthenticated: the endpoint shared Google Maps lists load from.
+  maps: 'https://www.google.com/maps/preview/entitylist/getlist',
 };
 
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
