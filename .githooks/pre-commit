@@ -9,8 +9,10 @@ if [ -n "$bad" ]; then
   exit 1
 fi
 
-# Google client secrets (GOCSPX-), Cloudflare tunnel tokens (base64 JSON starting {"a":), private keys.
-if git diff --cached -U0 -- . ':!.githooks/pre-commit' | grep -E '^\+' | grep -qE 'GOCSPX-|eyJhIjoi|-----BEGIN [A-Z ]*PRIVATE KEY'; then
+# Google client secrets (GOCSPX-), refresh tokens (1//0) and API keys (AIza), Cloudflare tunnel
+# tokens (base64 JSON starting {"a":), GitHub and Anthropic tokens, private keys.
+if git diff --cached -U0 -- . ':!.githooks/pre-commit' | grep -E '^\+' |
+  grep -qE 'GOCSPX-|1//0[A-Za-z0-9_-]{20}|AIza[0-9A-Za-z_-]{35}|eyJhIjoi|gh[pousr]_[A-Za-z0-9]{36}|github_pat_|sk-ant-|-----BEGIN [A-Z ]*PRIVATE KEY'; then
   echo "pre-commit: staged changes look like they contain a secret." >&2
   exit 1
 fi

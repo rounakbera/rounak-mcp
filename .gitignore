@@ -3,4 +3,14 @@
 .env.*
 !.env.example
 data/
+*.pem
+*.key
+*.p12
+credentials*.json
+client_secret*.json
+
+# Local tooling
 node_modules/
+.claude/settings.local.json
+.DS_Store
+*.log
