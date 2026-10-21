@@ -32,7 +32,8 @@ describe('maps', () => {
     const { total_matches, places } = await call(client, 'maps_search_saved', { near: SOHO, radius_km: 5 });
     assert.equal(total_matches, 3);
     assert.deepEqual(places.map((p) => [p.name, p.list]), [['Gelato Spot', 'dessert'], ['Fish Place', 'NYC'], ['Pasta Place', 'NYC']]);
-    assert.ok(places[0].distance_km < places[1].distance_km);
+    // Rounded to two decimals, not one: Gelato Spot is 0.13 km away.
+    assert.deepEqual(places.slice(0, 2).map((p) => p.distance_km), [0.13, 0.8]);
     const limited = await call(client, 'maps_search_saved', { near: SOHO, max_results: 1 });
     assert.deepEqual([limited.total_matches, limited.places.length], [4, 1]);
   });

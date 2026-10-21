@@ -25,6 +25,13 @@ const eventFields = {
 const when = (v, tz) => (isDate(v) ? { date: v } : { dateTime: v, ...(tz && { timeZone: tz }) });
 const startMs = (e) => Date.parse(e.start);
 
+// Formats `ms` in the UTC offset of `like` (Z or ±HH:MM), e.g. 2026-10-21T09:00:00-04:00.
+function inOffset(ms, like) {
+  const [offset, sign, hh, mm] = like.match(/([+-])(\d\d):(\d\d)$/) ?? ['Z', '+', '00', '00'];
+  const local = new Date(ms + (sign === '-' ? -1 : 1) * (hh * 60 + Number(mm)) * 60_000).toISOString();
+  return `${local.slice(0, 23).replace(/\.000$/, '')}${offset}`;
+}
+
 // Compact event for Claude, tagged with where it lives.
 function event(acct, calId, e, calendarTz) {
   return {
@@ -67,6 +74,19 @@ export default {
     async function calendars(acct) {
       const { items = [] } = await api(acct, 'GET', '/users/me/calendarList?maxResults=250');
       return items;
+    }
+
+    // The calendar's real ID and time zone, so single-event results match calendar_list_events.
+    // Falls back to the ID as given for calendars that aren't in the account's list.
+    async function calendarOf(acct, calId) {
+      const c = (await calendars(acct)).find((c) => matches(c, [calId]));
+      return { id: c?.id ?? calId, timeZone: c?.timeZone };
+    }
+    // Looks the calendar up before `fetch` runs, so a failed lookup never follows a write.
+    async function single(args, fetch) {
+      const acct = resolve(args.account);
+      const c = await calendarOf(acct, args.calendar_id);
+      return event(acct, c.id, await fetch(), c.timeZone);
     }
 
     // The calendars to read on each account: `ids` where the account has them, else its defaults.
@@ -150,7 +170,7 @@ export default {
     );
 
     tool('calendar_get_event', 'Read one calendar event', { event_id: id, calendar_id: calendarId, account }, READ, async (args) =>
-      event(resolve(args.account), args.calendar_id, await cal(args, 'GET', eventPath(args.calendar_id, args.event_id))),
+      single(args, () => cal(args, 'GET', eventPath(args.calendar_id, args.event_id))),
     );
 
     tool(
@@ -162,8 +182,7 @@ export default {
       async (args) => {
         const body = eventBody(args);
         if (args.add_meet) body.conferenceData = { createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: 'hangoutsMeet' } } };
-        const e = await cal(args, 'POST', `${eventPath(args.calendar_id)}${writeQuery(args, { conferenceDataVersion: 1 })}`, body);
-        return event(resolve(args.account), args.calendar_id, e);
+        return single(args, () => cal(args, 'POST', `${eventPath(args.calendar_id)}${writeQuery(args, { conferenceDataVersion: 1 })}`, body));
       },
     );
 
@@ -178,10 +197,7 @@ export default {
         send_updates: sendUpdates,
       },
       DESTRUCTIVE,
-      async (args) => {
-        const e = await cal(args, 'PATCH', `${eventPath(args.calendar_id, args.event_id)}${writeQuery(args)}`, eventBody(args));
-        return event(resolve(args.account), args.calendar_id, e);
-      },
+      async (args) => single(args, () => cal(args, 'PATCH', `${eventPath(args.calendar_id, args.event_id)}${writeQuery(args)}`, eventBody(args))),
     );
 
     tool(
@@ -207,14 +223,13 @@ export default {
         const self = attendees.find((a) => a.self);
         if (!self) throw new Error('You are not an attendee of this event');
         // attendeesOmitted: change only our own response and leave the rest of the guest list alone.
-        const e = await cal(args, 'PATCH', path, { attendeesOmitted: true, attendees: [{ email: self.email, responseStatus: args.response }] });
-        return event(resolve(args.account), args.calendar_id, e);
+        return single(args, () => cal(args, 'PATCH', path, { attendeesOmitted: true, attendees: [{ email: self.email, responseStatus: args.response }] }));
       },
     );
 
     tool(
       'calendar_find_free_time',
-      'Find free slots in a time range, treating every default calendar of every linked account as busy time unless `account` or `calendar_ids` is given',
+      'Find free slots in a time range, treating every default calendar of every linked account as busy time unless `account` or `calendar_ids` is given. Times are returned in time_min\'s UTC offset.',
       {
         time_min: z.iso.datetime({ offset: true }),
         time_max: z.iso.datetime({ offset: true }),
@@ -252,7 +267,7 @@ export default {
           if (s - cursor >= args.duration_minutes * 60_000) free.push([cursor, s]);
           cursor = Math.max(cursor, e);
         }
-        const iso = ([s, e]) => ({ start: new Date(s).toISOString(), end: new Date(e).toISOString() });
+        const iso = ([s, e]) => ({ start: inOffset(s, args.time_min), end: inOffset(e, args.time_min) });
         return { free: free.map(iso), busy: merged.map(iso), ...(errors.length && { errors }) };
       },
     );
