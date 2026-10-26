@@ -142,7 +142,9 @@ server won't start while any value is still `REPLACE_ME`.
   responding to events) are marked `destructiveHint`, so Claude asks before doing them. Each of these
   can reach people outside the account.
 - Forwarded attachments' names and types come from the original sender, so they're sanitised before
-  going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit.
+  going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit. The approval
+  prompt for a forward shows the message ID, not its contents, so check what's being forwarded,
+  especially when the request came from an email.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at

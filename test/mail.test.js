@@ -66,6 +66,7 @@ describe('mail', () => {
     msg.payload.parts[1] = { mimeType: 'text/html\r\nBcc: spy@evil.example', filename: 'a"\r\nBcc: spy@evil.example\r\n.pdf', body: { data: 'eA', size: 1 } };
     msg.payload.parts.push({ mimeType: 'image/png', filename: 'café.png', body: { attachmentId: 'a2', size: 11 } });
     msg.payload.parts.push({ mimeType: 'message/rfc822', filename: `\ud800${'x'.repeat(3000)}`, body: { data: 'eA', size: 1 } });
+    msg.payload.parts.push({ mimeType: 'text/plain', filename: `${'y'.repeat(199)}😀`, body: { data: 'eA', size: 1 } });
     ctx.google.mailbox(OWNER).threads.push({ id: 't9', messages: [msg] });
     await call(client, 'mail_forward_message', { account: OWNER, message_id: 'm9', to: 'carol@example.com' });
     const mime = decodeRaw(ctx.google.mailbox(OWNER).sent.at(-1).raw);
@@ -74,6 +75,7 @@ describe('mail', () => {
     assert.match(mime, /Content-Type: application\/octet-stream\r\nContent-Disposition: attachment; filename="a___Bcc: spy@evil\.example__\.pdf"\r\n/);
     assert.match(mime, /filename\*=UTF-8''caf%C3%A9\.png\r\n/);
     assert.match(mime, /Content-Type: application\/octet-stream\r\nContent-Disposition: attachment; filename\*=UTF-8''%EF%BF%BDx{199}\r\n/);
+    assert.match(mime, /filename\*=UTF-8''y{199}%EF%BF%BD\r\n/);
   });
 
   test('refuses to forward attachments over 25 MB', async () => {
