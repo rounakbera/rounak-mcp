@@ -40,7 +40,8 @@ deploy/              systemd user units, install.sh, hourly update.sh
 
 - **Core:** `list_accounts`
 - **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread`,
-  `mail_send_email` (also handles replies), `mail_create_draft`, `mail_list_labels`,
+  `mail_send_email` (also handles replies), `mail_forward_message` (with attachments, kept in the
+  original thread), `mail_create_draft`, `mail_list_labels`,
   `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`
 - **calendar:** `calendar_list_calendars`, `calendar_list_events` (merges calendars across all
   accounts by default), `calendar_get_event`, `calendar_create_event`, `calendar_update_event`,
@@ -137,9 +138,11 @@ server won't start while any value is still `REPLACE_ME`.
   `calendar.freebusy`: it can read and edit events, but it can't create, delete or share calendars.
   Inviting attendees shares an event's details with them; `send_updates` only controls whether
   they're also emailed.
-- Sending, trashing, and every calendar write (creating, changing, deleting and responding to
-  events) are marked `destructiveHint`, so Claude asks before doing them. Each of these can reach
-  people outside the account.
+- Sending, forwarding, trashing, and every calendar write (creating, changing, deleting and
+  responding to events) are marked `destructiveHint`, so Claude asks before doing them. Each of these
+  can reach people outside the account.
+- Forwarded attachments' names and types come from the original sender, so they're sanitised before
+  going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
+import { gmailMessage } from './helpers/fake-google.js';
 import { call, connect, decodeRaw, link, OWNER, setup, signInAndGetTokens, WORK } from './helpers/harness.js';
 
 describe('mail', () => {
@@ -41,10 +42,51 @@ describe('mail', () => {
     assert.equal(Buffer.from(mime.split('\r\n\r\n')[1], 'base64').toString(), 'Thanks!');
   });
 
+  test('forwards a message with its attachments, in its thread', async () => {
+    const args = { account: OWNER, message_id: 'm1', to: 'carol@example.com', body: 'FYI' };
+    const sent = await call(client, 'mail_forward_message', args);
+    assert.equal(sent.thread_id, 't1');
+    const { raw, threadId } = ctx.google.mailbox(OWNER).sent.at(-1);
+    assert.equal(threadId, 't1');
+    const mime = decodeRaw(raw);
+    assert.match(mime, /^To: carol@example\.com\r$/m);
+    assert.match(mime, /^Subject: Fwd: Your invoice\r$/m);
+    assert.match(mime, /^In-Reply-To: <m1@example\.com>\r$/m);
+    const boundary = mime.match(/^Content-Type: multipart\/mixed; boundary="([^"]+)"\r$/m)[1];
+    const [, text, file] = mime.split(`--${boundary}`);
+    const decode = (part) => Buffer.from(part.split('\r\n\r\n')[1], 'base64').toString();
+    assert.match(decode(text), /^FYI\n\n---------- Forwarded message ---------\nFrom: Alice <alice@example\.com>\n[^]*\ninvoice attached$/);
+    assert.match(file, /Content-Type: application\/pdf\r\nContent-Disposition: attachment; filename="invoice\.pdf"/);
+    assert.equal(decode(file), '%PDF-a1....');
+  });
+
+  test('forwards attachments with hostile names and types as safe headers', async () => {
+    const msg = gmailMessage({ id: 'm9', threadId: 't9', from: 'eve@example.com', subject: 'Fwd: hi', body: 'x' });
+    msg.payload.parts[1] = { mimeType: 'text/html\r\nBcc: spy@evil.example', filename: 'a"\r\nBcc: spy@evil.example\r\n.pdf', body: { data: 'eA', size: 1 } };
+    msg.payload.parts.push({ mimeType: 'image/png', filename: 'café.png', body: { attachmentId: 'a2', size: 11 } });
+    ctx.google.mailbox(OWNER).threads.push({ id: 't9', messages: [msg] });
+    await call(client, 'mail_forward_message', { account: OWNER, message_id: 'm9', to: 'carol@example.com' });
+    const mime = decodeRaw(ctx.google.mailbox(OWNER).sent.at(-1).raw);
+    assert.doesNotMatch(mime, /^Bcc:/m);
+    assert.match(mime, /^Subject: Fwd: hi\r$/m);
+    assert.match(mime, /Content-Type: application\/octet-stream\r\nContent-Disposition: attachment; filename="a___Bcc: spy@evil\.example__\.pdf"\r\n/);
+    assert.match(mime, /filename\*=UTF-8''caf%C3%A9\.png\r\n/);
+  });
+
+  test('refuses to forward attachments over 25 MB', async () => {
+    const msg = gmailMessage({ id: 'm10', threadId: 't10', from: 'eve@example.com', subject: 'big', body: 'x' });
+    msg.payload.parts[1].body.size = 26 * 1024 * 1024;
+    ctx.google.mailbox(OWNER).threads.push({ id: 't10', messages: [msg] });
+    const before = ctx.google.mailbox(OWNER).sent.length;
+    await assert.rejects(call(client, 'mail_forward_message', { account: OWNER, message_id: 'm10', to: 'carol@example.com' }), /over 25 MB/);
+    assert.equal(ctx.google.mailbox(OWNER).sent.length, before);
+  });
+
   test('rejects header injection', async () => {
+    const before = ctx.google.mailbox(OWNER).sent.length;
     const args = { account: OWNER, to: 'a@example.com', subject: 'hi\r\nBcc: spy@evil.example', body: 'x' };
     await assert.rejects(call(client, 'mail_send_email', args), /line breaks/);
-    assert.equal(ctx.google.mailbox(OWNER).sent.length, 1);
+    assert.equal(ctx.google.mailbox(OWNER).sent.length, before);
   });
 
   test('rejects IDs that would change the request path', async () => {
