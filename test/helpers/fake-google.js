@@ -16,7 +16,7 @@ export function gmailMessage({ id, threadId, from, subject, body, snippet = body
       headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
       parts: [
         { mimeType: 'text/plain', body: { data: b64url(body) } },
-        { mimeType: 'application/pdf', filename: 'invoice.pdf', body: { attachmentId: 'a1' } },
+        { mimeType: 'application/pdf', filename: 'invoice.pdf', body: { attachmentId: 'a1', size: 11 } },
       ],
     },
   };
@@ -97,6 +97,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   const gmailRoutes = [
     ['GET', /^\/threads$/, (box, _m, { query }) => [200, { threads: box.threads.filter((t) => t.messages.some((x) => x.snippet.includes(query.get('q')))).map(({ id }) => ({ id })) }]],
     ['GET', /^\/threads\/([^/]+)$/, (box, m) => box.threads.find((t) => t.id === m[1])],
+    ['GET', /^\/messages\/([^/]+)\/attachments\/([^/]+)$/, (_box, m) => [200, { size: 11, data: b64url(`%PDF-${m[2]}`.padEnd(11, '.')) }]],
     ['GET', /^\/messages\/([^/]+)$/, (box, m) => box.threads.flatMap((t) => t.messages).find((x) => x.id === m[1])],
     ['GET', /^\/labels$/, () => [200, { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_1', name: 'Receipts', type: 'user' }] }]],
     ['POST', /^\/messages\/send$/, (box, _m, { json }) => (box.sent.push(json), [200, { id: `sent-${box.sent.length}`, threadId: json.threadId }])],

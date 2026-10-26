@@ -3,6 +3,8 @@ import { account, DESTRUCTIVE, id, READ, WRITE } from '../../tools.js';
 import { bodyText, header, parts, rawMessage, unescapeHtml } from './mime.js';
 
 const MAX_BODY_CHARS = 20_000;
+// Gmail's own limit on attachments in a sent message.
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const threadId = id;
 const composeArgs = {
@@ -99,6 +101,49 @@ export default {
       const draft = await gmail(args, 'POST', '/drafts', { message: await compose(args) });
       return { draft_id: draft.id, thread_id: draft.message?.threadId };
     });
+
+    tool(
+      'mail_forward_message',
+      'Forward a message, including its attachments, to new recipients. The forward stays in the original thread.',
+      {
+        account,
+        message_id: id.describe('Message ID to forward'),
+        to: z.string().describe('Comma-separated recipients'),
+        cc: z.string().optional(),
+        bcc: z.string().optional(),
+        body: z.string().default('').describe('Plain-text note above the forwarded message'),
+      },
+      DESTRUCTIVE,
+      async (args) => {
+        const message = `/messages/${encodeURIComponent(args.message_id)}`;
+        const orig = await gmail(args, 'GET', `${message}?format=full`);
+        const files = parts(orig.payload).filter((p) => p.filename && (p.body?.attachmentId || p.body?.data));
+        if (files.reduce((n, p) => n + (p.body.size ?? 0), 0) > MAX_ATTACHMENT_BYTES) {
+          throw new Error('Attachments are over 25 MB, too large to forward');
+        }
+        const attachments = await Promise.all(
+          files.map(async (p) => {
+            const { data } = p.body.data ? p.body : await gmail(args, 'GET', `${message}/attachments/${encodeURIComponent(p.body.attachmentId)}`);
+            return { filename: p.filename, mimeType: p.mimeType, data: Buffer.from(data, 'base64url') };
+          }),
+        );
+        const subject = header(orig, 'Subject') ?? '';
+        const messageId = header(orig, 'Message-ID');
+        const quoted = ['From', 'Date', 'Subject', 'To', 'Cc'].filter((h) => header(orig, h)).map((h) => `${h}: ${header(orig, h)}`);
+        const raw = rawMessage({
+          to: args.to,
+          cc: args.cc,
+          bcc: args.bcc,
+          subject: /^fwd?:/i.test(subject) ? subject : `Fwd: ${subject}`,
+          body: [args.body, '', '---------- Forwarded message ---------', ...quoted, '', bodyText(orig.payload)].join('\n').trimStart(),
+          inReplyTo: messageId,
+          references: [header(orig, 'References'), messageId].filter(Boolean).join(' '),
+          attachments,
+        });
+        const sent = await gmail(args, 'POST', '/messages/send', { raw, threadId: orig.threadId });
+        return { message_id: sent.id, thread_id: sent.threadId, to: args.to, cc: args.cc, bcc: args.bcc, attachments: files.map((p) => p.filename) };
+      },
+    );
 
     tool('mail_list_labels', 'List Gmail labels and their IDs', { account }, READ, async (args) => {
       const { labels = [] } = await gmail(args, 'GET', '/labels');
