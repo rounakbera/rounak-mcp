@@ -25,8 +25,9 @@ const base64Lines = (buf) => buf.toString('base64').replace(/.{76}/g, '$&\r\n');
 
 // Filename and type come from the original sender, so they're reduced to safe header values.
 function attachmentPart({ filename, mimeType, data }) {
-  const type = /^[\w.+-]+\/[\w.+-]+$/.test(mimeType ?? '') ? mimeType : 'application/octet-stream';
-  const name = filename.replace(/[\x00-\x1f\x7f"\\]/g, '_');
+  // message/* and multipart/* parts can't be base64-encoded, so they go as opaque files.
+  const type = /^(?!message\/|multipart\/)[\w.+-]+\/[\w.+-]+$/i.test(mimeType ?? '') ? mimeType : 'application/octet-stream';
+  const name = filename.toWellFormed().slice(0, 200).replace(/[\x00-\x1f\x7f"\\]/g, '_');
   const param = /^[\x20-\x7e]*$/.test(name) ? `filename="${name}"` : `filename*=UTF-8''${encodeURIComponent(name)}`;
   return [`Content-Type: ${type}`, `Content-Disposition: attachment; ${param}`, 'Content-Transfer-Encoding: base64', '', base64Lines(data)].join('\r\n');
 }

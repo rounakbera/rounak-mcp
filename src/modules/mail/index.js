@@ -104,7 +104,7 @@ export default {
 
     tool(
       'mail_forward_message',
-      'Forward a message with its attachments. The forward stays in the original thread.',
+      'Forward a message, including its attachments, to new recipients. The forward stays in the original thread.',
       {
         account,
         message_id: id.describe('Message ID to forward'),
@@ -141,7 +141,7 @@ export default {
           attachments,
         });
         const sent = await gmail(args, 'POST', '/messages/send', { raw, threadId: orig.threadId });
-        return { message_id: sent.id, thread_id: sent.threadId };
+        return { message_id: sent.id, thread_id: sent.threadId, to: args.to, cc: args.cc, bcc: args.bcc, attachments: files.map((p) => p.filename) };
       },
     );
 
