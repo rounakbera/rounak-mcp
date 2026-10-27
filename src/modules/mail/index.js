@@ -25,11 +25,14 @@ export default {
     const gmail = (args, method, path, body) => api(resolve(args.account), method, path, body);
     const thread = (id) => `/threads/${encodeURIComponent(id)}`;
     const draftPath = (id) => `/drafts/${encodeURIComponent(id)}`;
+    // A recipient list as its sorted, lower-cased email addresses, ignoring display names.
+    const addresses = (list) => (list?.toLowerCase().match(/[^\s<>,;"]+@[^\s<>,;"]+/g) ?? []).sort().join(',');
     const recipients = (msg) => Object.fromEntries(['To', 'Cc', 'Bcc', 'Subject'].map((h) => [h.toLowerCase(), header(msg, h)]));
 
     // Builds the Gmail API message, filling reply headers from the original when replying.
     async function compose(args) {
-      const fields = { ...args };
+      const { to, cc, bcc, subject, body } = args;
+      const fields = { to, cc, bcc, subject, body };
       let threadId;
       if (args.reply_to_message_id) {
         const meta = ['Message-ID', 'References', 'Subject', 'From', 'Reply-To'].map((h) => `metadataHeaders=${h}`).join('&');
@@ -189,13 +192,23 @@ export default {
       },
     );
 
+    // The recipients are required so the approval prompt shows them; a draft ID alone could hide who it goes to.
     tool(
       'mail_send_draft',
-      'Send a draft. The approval prompt shows only the draft ID, so first show the user the draft (mail_get_draft).',
-      { draft_id: id, account },
+      "Send a draft. `to`, `cc` and `bcc` must match the draft's recipients (from mail_get_draft), or nothing is sent.",
+      {
+        draft_id: id,
+        account,
+        to: z.string().describe("The draft's To recipients"),
+        cc: z.string().default('').describe("The draft's Cc recipients, if any"),
+        bcc: z.string().default('').describe("The draft's Bcc recipients, if any"),
+      },
       DESTRUCTIVE,
       async (args) => {
         const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=metadata`);
+        const current = recipients(message);
+        const mismatched = ['to', 'cc', 'bcc'].filter((f) => addresses(args[f]) !== addresses(current[f]));
+        if (mismatched.length) throw new Error(`The draft's ${mismatched.join(', ')} differ from what was given; nothing was sent`);
         const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
         return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
       },

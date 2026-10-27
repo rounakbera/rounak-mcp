@@ -95,6 +95,13 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   };
 
   const NOT_FOUND = [404, { error: { message: 'Not Found' } }];
+  // Like Gmail, exposes a `raw` message's top-level headers as `payload.headers`.
+  const parseRaw = (message) => {
+    if (!message.raw) return message;
+    const head = Buffer.from(message.raw, 'base64url').toString().split('\r\n\r\n')[0];
+    const headers = head.split('\r\n').map((line) => line.match(/^([^:]+): (.*)$/)).map(([, name, value]) => ({ name, value }));
+    return { ...message, payload: { headers } };
+  };
   const gmailRoutes = [
     ['GET', /^\/threads$/, (box, _m, { query }) => [200, { threads: box.threads.filter((t) => t.messages.some((x) => x.snippet.includes(query.get('q')))).map(({ id }) => ({ id })) }]],
     ['GET', /^\/threads\/([^/]+)$/, (box, m) => box.threads.find((t) => t.id === m[1])],
@@ -103,7 +110,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     ['GET', /^\/labels$/, () => [200, { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_1', name: 'Receipts', type: 'user' }] }]],
     ['POST', /^\/messages\/send$/, (box, _m, { json }) => (box.sent.push(json), [200, { id: `sent-${box.sent.length}`, threadId: json.threadId }])],
     ['POST', /^\/drafts$/, (box, _m, { json }) => {
-      const d = { id: `draft-${box.drafts.length + 1}`, message: { id: `dm-${box.drafts.length + 1}`, ...json.message } };
+      const d = { id: `draft-${box.drafts.length + 1}`, message: parseRaw({ id: `dm-${box.drafts.length + 1}`, ...json.message }) };
       box.drafts.push(d);
       return d;
     }],
@@ -120,7 +127,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     ['PUT', /^\/drafts\/([^/]+)$/, (box, m, { json }) => {
       const d = box.drafts.find((x) => x.id === m[1]);
       if (!d) return NOT_FOUND;
-      d.message = { id: `${d.message.id}-v2`, ...json.message };
+      d.message = parseRaw({ id: `${d.message.id}-v2`, ...json.message });
       return d;
     }],
     ['DELETE', /^\/drafts\/([^/]+)$/, (box, m) => {

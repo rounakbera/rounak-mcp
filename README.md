@@ -148,8 +148,9 @@ server won't start while any value is still `REPLACE_ME`.
   going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit. The approval
   prompt for a forward shows the message ID, not its contents, so check what's being forwarded,
   especially when the request came from an email.
-- In the same way, the approval prompt for sending a draft shows only the draft ID. Creating a draft
-  doesn't need approval, so check a draft's recipients and text before approving its send.
+- Creating a draft doesn't need approval, so `mail_send_draft` must be given the draft's To, Cc and
+  Bcc, and refuses to send if they don't match. The approval prompt therefore shows where the draft
+  goes; check its text with `mail_get_draft` before approving.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at

@@ -161,13 +161,28 @@ describe('mail', () => {
 
   test('sends and deletes drafts', async () => {
     seedDraft('d4');
-    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id: 'd4' });
+    const recipientArgs = { to: 'alice@example.com', cc: 'CC@example.com', bcc: 'bcc@example.com' };
+    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id: 'd4', ...recipientArgs });
     assert.deepEqual([sent.thread_id, sent.to, sent.bcc], ['t1', 'Alice <alice@example.com>', 'bcc@example.com']);
     seedDraft('d5');
     assert.deepEqual(await call(client, 'mail_delete_draft', { account: OWNER, draft_id: 'd5' }), { ok: true });
     const ids = ctx.google.mailbox(OWNER).drafts.map((d) => d.id);
     assert.ok(!ids.includes('d4') && !ids.includes('d5'));
     await assert.rejects(call(client, 'mail_delete_draft', { account: OWNER, draft_id: 'd5' }), /404/);
+  });
+
+  test('sends a draft only to the recipients named in the call', async () => {
+    // A draft made without approval, then sent: the approval prompt must show where it goes.
+    const { draft_id } = await call(client, 'mail_create_draft', { account: OWNER, to: 'spy@evil.example', subject: 's', body: 'secret' });
+    const before = ctx.google.mailbox(OWNER).sent.length;
+    for (const recipientArgs of [{ to: 'alice@example.com' }, { to: 'spy@evil.example', bcc: 'x@example.com' }]) {
+      await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id, ...recipientArgs }), /nothing was sent/);
+    }
+    await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id }), /to/);
+    assert.equal(ctx.google.mailbox(OWNER).sent.length, before);
+    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id, to: 'Spy <SPY@evil.example>' });
+    assert.equal(sent.to, 'spy@evil.example');
+    assert.equal(ctx.google.mailbox(OWNER).sent.length, before + 1);
   });
 
   test('marks tools that send, overwrite or delete as destructive', async () => {
