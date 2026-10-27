@@ -39,13 +39,13 @@ deploy/              systemd user units, install.sh, hourly update.sh
 ## Tools
 
 - **Core:** `list_accounts`
-- **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread` (gives drafts'
-  IDs too),
-  `mail_send_email` (also handles replies), `mail_forward_message` (with attachments, kept in the
-  original thread), `mail_create_draft`, `mail_list_drafts`, `mail_get_draft`, `mail_update_draft`
-  (keeps the sender, reply threading and attachments), `mail_send_draft`, `mail_delete_draft`,
-  `mail_list_labels`, `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`,
-  `mail_trash_message` (one message in a thread; drafts go through `mail_delete_draft`)
+- **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread` (gives
+  drafts' IDs too), `mail_send_email` (also handles replies), `mail_forward_message` (with
+  attachments, kept in the original thread), `mail_create_draft`, `mail_list_drafts`,
+  `mail_get_draft`, `mail_update_draft` (keeps the sender, reply threading, attachments, and the
+  formatting unless the body changes), `mail_send_draft`, `mail_delete_draft`, `mail_list_labels`,
+  `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`, `mail_trash_message`
+  (one message in a thread; drafts go through `mail_delete_draft`)
 - **calendar:** `calendar_list_calendars`, `calendar_list_events` (merges calendars across all
   accounts by default), `calendar_get_event`, `calendar_create_event`, `calendar_update_event`,
   `calendar_delete_event`, `calendar_respond_to_event`, `calendar_find_free_time`
