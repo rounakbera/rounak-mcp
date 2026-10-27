@@ -161,7 +161,7 @@ describe('mail', () => {
 
   test('sends and deletes drafts', async () => {
     seedDraft('d4');
-    const recipientArgs = { to: 'alice@example.com', cc: 'CC@example.com', bcc: 'bcc@example.com' };
+    const recipientArgs = { to: 'Alice  <ALICE@example.com>', cc: 'cc@example.com', bcc: 'bcc@example.com' };
     const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id: 'd4', ...recipientArgs });
     assert.deepEqual([sent.thread_id, sent.to, sent.bcc], ['t1', 'Alice <alice@example.com>', 'bcc@example.com']);
     seedDraft('d5');
@@ -178,9 +178,17 @@ describe('mail', () => {
     for (const recipientArgs of [{ to: 'alice@example.com' }, { to: 'spy@evil.example', bcc: 'x@example.com' }]) {
       await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id, ...recipientArgs }), /nothing was sent/);
     }
+    // Quoted local parts must not hide a recipient or disguise one as another.
+    for (const [draftArgs, sendArgs] of [
+      [{ to: 'alice@example.com', bcc: '"spy"@evil.example' }, { to: 'alice@example.com' }],
+      [{ to: '"alice@example.com"@evil.example' }, { to: 'alice@example.com' }],
+    ]) {
+      const quoted = await call(client, 'mail_create_draft', { account: OWNER, ...draftArgs, subject: 's', body: 'secret' });
+      await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id: quoted.draft_id, ...sendArgs }), /nothing was sent/);
+    }
     await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id }), /to/);
     assert.equal(ctx.google.mailbox(OWNER).sent.length, before);
-    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id, to: 'Spy <SPY@evil.example>' });
+    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id, to: ' SPY@evil.example ' });
     assert.equal(sent.to, 'spy@evil.example');
     assert.equal(ctx.google.mailbox(OWNER).sent.length, before + 1);
   });

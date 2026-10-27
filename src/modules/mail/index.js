@@ -25,8 +25,9 @@ export default {
     const gmail = (args, method, path, body) => api(resolve(args.account), method, path, body);
     const thread = (id) => `/threads/${encodeURIComponent(id)}`;
     const draftPath = (id) => `/drafts/${encodeURIComponent(id)}`;
-    // A recipient list as its sorted, lower-cased email addresses, ignoring display names.
-    const addresses = (list) => (list?.toLowerCase().match(/[^\s<>,;"]+@[^\s<>,;"]+/g) ?? []).sort().join(',');
+    // A header value compared as written, ignoring only case and spacing. Parsing addresses out of it
+    // instead would let quoted or commented addresses differ from what the approval prompt shows.
+    const normalized = (value) => (value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
     const recipients = (msg) => Object.fromEntries(['To', 'Cc', 'Bcc', 'Subject'].map((h) => [h.toLowerCase(), header(msg, h)]));
 
     // Builds the Gmail API message, filling reply headers from the original when replying.
@@ -195,7 +196,7 @@ export default {
     // The recipients are required so the approval prompt shows them; a draft ID alone could hide who it goes to.
     tool(
       'mail_send_draft',
-      "Send a draft. `to`, `cc` and `bcc` must match the draft's recipients (from mail_get_draft), or nothing is sent.",
+      "Send a draft. `to`, `cc` and `bcc` must be exactly the draft's To, Cc and Bcc as mail_get_draft shows them, or nothing is sent.",
       {
         draft_id: id,
         account,
@@ -207,7 +208,7 @@ export default {
       async (args) => {
         const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=metadata`);
         const current = recipients(message);
-        const mismatched = ['to', 'cc', 'bcc'].filter((f) => addresses(args[f]) !== addresses(current[f]));
+        const mismatched = ['to', 'cc', 'bcc'].filter((f) => normalized(args[f]) !== normalized(current[f]));
         if (mismatched.length) throw new Error(`The draft's ${mismatched.join(', ')} differ from what was given; nothing was sent`);
         const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
         return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
