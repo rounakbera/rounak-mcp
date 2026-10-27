@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { account, DESTRUCTIVE, id, READ, WRITE } from '../../tools.js';
-import { bodyText, header, parts, rawMessage, unescapeHtml } from './mime.js';
+import { bodyText, draftText, header, parts, partText, rawMessage, unescapeHtml } from './mime.js';
 
 const MAX_BODY_CHARS = 20_000;
 // Gmail's own limit on attachments in a sent message.
@@ -58,7 +58,8 @@ export default {
       return Promise.all(
         files.map(async (p) => {
           const { data } = p.body.data ? p.body : await gmail(args, 'GET', path + encodeURIComponent(p.body.attachmentId));
-          return { filename: p.filename, mimeType: p.mimeType, data: Buffer.from(data, 'base64url') };
+          const contentId = p.headers?.find((h) => h.name.toLowerCase() === 'content-id')?.value;
+          return { filename: p.filename, mimeType: p.mimeType, contentId, data: Buffer.from(data, 'base64url') };
         }),
       );
     }
@@ -178,14 +179,14 @@ export default {
         draft_id: args.draft_id,
         thread_id: message.threadId,
         ...recipients(message),
-        body: bodyText(message.payload).slice(0, MAX_BODY_CHARS),
+        body: draftText(message.payload).slice(0, MAX_BODY_CHARS),
         attachments: parts(message.payload).filter((p) => p.filename).map((p) => p.filename),
       };
     });
 
     tool(
       'mail_update_draft',
-      'Change a draft. Fields left out keep their current value; pass an empty string to clear one. The draft is saved as plain text, so formatting from Gmail is lost. Reply threading and attachments are kept.',
+      "Change a draft. Fields left out keep their current value; pass an empty string to clear one. Leaving out `body` keeps the draft's text and formatting as they are; a new `body` is saved as plain text. Reply threading and attachments are kept.",
       {
         draft_id: id,
         account,
@@ -193,7 +194,7 @@ export default {
         cc: z.string().optional(),
         bcc: z.string().optional(),
         subject: z.string().optional(),
-        body: z.string().optional().describe('Plain-text body; replaces the whole body'),
+        body: z.string().optional().describe('Plain-text body; replaces the whole body. Start from mail_get_draft, not the plain-text copy in mail_get_thread.'),
       },
       // It overwrites the draft and can change who it goes to when sent, so it needs confirming.
       DESTRUCTIVE,
@@ -208,7 +209,9 @@ export default {
           cc: args.cc ?? current.cc,
           bcc: args.bcc ?? current.bcc,
           subject: args.subject ?? current.subject,
-          body: args.body ?? bodyText(message.payload),
+          // Unchanged, the body keeps both of Gmail's copies: the HTML, and its hard-wrapped plain text.
+          body: args.body ?? partText(message.payload, 'text/plain') ?? draftText(message.payload),
+          html: args.body === undefined ? partText(message.payload, 'text/html') : undefined,
           inReplyTo: header(message, 'In-Reply-To'),
           references: header(message, 'References'),
           attachments: await attachmentsOf(args, message),

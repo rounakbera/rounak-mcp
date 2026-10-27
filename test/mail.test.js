@@ -153,6 +153,63 @@ describe('mail', () => {
     assert.match(file, /filename="invoice\.pdf"/);
   });
 
+  // A draft written in Gmail: HTML, a plain-text copy Gmail hard-wraps with CRLF, and an inline image.
+  const seedGmailDraft = (id) => {
+    const b64 = (t) => Buffer.from(t).toString('base64url');
+    const plain = 'Had a few follow up questions for the Egypt trip. We both\r\nland after the welcome meeting.\r\n\r\nThanks';
+    const html = '<div dir="ltr">Had a few follow up questions for the Egypt trip. We both land after the welcome meeting.<div><br></div><div>Thanks &amp; <img src="cid:ii_1"></div></div>';
+    const headers = [['From', OWNER], ['To', 'jess@example.com'], ['Subject', 'Re: trip']].map(([name, value]) => ({ name, value }));
+    const message = {
+      id: `${id}-msg`,
+      threadId: 't1',
+      labelIds: ['DRAFT'],
+      payload: {
+        mimeType: 'multipart/related',
+        headers,
+        parts: [
+          { mimeType: 'multipart/alternative', parts: [{ mimeType: 'text/plain', body: { data: b64(plain) } }, { mimeType: 'text/html', body: { data: b64(html) } }] },
+          { mimeType: 'image/png', filename: 'map.png', headers: [{ name: 'Content-ID', value: '<ii_1>' }], body: { data: b64('PNG'), size: 3 } },
+        ],
+      },
+    };
+    ctx.google.mailbox(OWNER).drafts.push({ id, message });
+    return { plain, html };
+  };
+  // Splits a raw message into its leaf parts as { type, headers, text }.
+  const leafParts = (mime) => {
+    const boundary = mime.match(/boundary="([^"]+)"/)?.[1];
+    if (!boundary) {
+      const [head, body] = mime.split('\r\n\r\n');
+      return [{ type: head.match(/^Content-Type: ([^;\r]+)/m)[1], headers: head, text: Buffer.from(body, 'base64').toString() }];
+    }
+    return mime.split(`--${boundary}`).slice(1, -1).flatMap((p) => leafParts(p.replace(/^\r\n/, '')));
+  };
+
+  test("reads a Gmail-written draft from its HTML, without Gmail's hard wraps", async () => {
+    seedGmailDraft('d31');
+    const draft = await call(client, 'mail_get_draft', { account: OWNER, draft_id: 'd31' });
+    assert.equal(draft.body, 'Had a few follow up questions for the Egypt trip. We both land after the welcome meeting.\n\nThanks &');
+  });
+
+  test('keeps the HTML, plain text and inline images of a draft when only its recipients change', async () => {
+    const { plain, html } = seedGmailDraft('d32');
+    await call(client, 'mail_update_draft', { account: OWNER, draft_id: 'd32', to: 'jess@example.com, josh@example.com' });
+    const mime = decodeRaw(ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd32').message.raw);
+    assert.match(mime, /^To: jess@example\.com, josh@example\.com\r$/m);
+    const [text, htmlPart, image] = leafParts(mime);
+    assert.deepEqual([text.type, text.text], ['text/plain', plain]);
+    assert.deepEqual([htmlPart.type, htmlPart.text], ['text/html', html]);
+    assert.match(image.headers, /Content-Disposition: inline; filename="map\.png"\r\nContent-ID: <ii_1>/);
+  });
+
+  test('saves a new draft body as plain text only', async () => {
+    seedGmailDraft('d33');
+    await call(client, 'mail_update_draft', { account: OWNER, draft_id: 'd33', body: 'New text' });
+    const mime = decodeRaw(ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd33').message.raw);
+    assert.deepEqual(leafParts(mime).map((p) => p.type), ['text/plain', 'image/png']);
+    assert.equal(leafParts(mime)[0].text, 'New text');
+  });
+
   test('rejects header injection when updating a draft', async () => {
     seedDraft('d3');
     const args = { account: OWNER, draft_id: 'd3', subject: 'hi\r\nBcc: spy@evil.example' };
