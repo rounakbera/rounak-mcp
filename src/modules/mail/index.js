@@ -100,16 +100,41 @@ export default {
       },
     );
 
-    tool('mail_get_thread', 'Read every message in a Gmail thread', { thread_id: threadId, account }, READ, async (args) => {
-      const { messages } = await gmail(args, 'GET', `${thread(args.thread_id)}?format=full`);
-      return messages.map((m) => ({
-        message_id: m.id,
-        ...Object.fromEntries(['From', 'To', 'Cc', 'Date', 'Subject'].map((h) => [h.toLowerCase(), header(m, h)])),
-        labels: m.labelIds,
-        body: bodyText(m.payload).slice(0, MAX_BODY_CHARS),
-        attachments: parts(m.payload).filter((p) => p.filename).map((p) => p.filename),
-      }));
-    });
+    // Maps the given draft message IDs to their draft IDs, paging through the account's drafts. It's
+    // extra detail for a thread read, so a failed lookup leaves IDs out instead of failing the read.
+    async function draftIds(args, messageIds) {
+      const found = new Map();
+      let pageToken;
+      try {
+        for (let page = 0; page < 10 && found.size < messageIds.length; page++) {
+          const q = new URLSearchParams({ maxResults: 500, ...(pageToken && { pageToken }) });
+          const { drafts = [], nextPageToken } = await gmail(args, 'GET', `/drafts?${q}`);
+          for (const d of drafts) if (messageIds.includes(d.message.id)) found.set(d.message.id, d.id);
+          if (!(pageToken = nextPageToken)) break;
+        }
+      } catch {}
+      return found;
+    }
+
+    tool(
+      'mail_get_thread',
+      'Read every message in a Gmail thread. Drafts in it have a `draft_id` for the draft tools.',
+      { thread_id: threadId, account },
+      READ,
+      async (args) => {
+        const { messages } = await gmail(args, 'GET', `${thread(args.thread_id)}?format=full`);
+        const drafts = messages.filter((m) => m.labelIds?.includes('DRAFT')).map((m) => m.id);
+        const ids = drafts.length ? await draftIds(args, drafts) : new Map();
+        return messages.map((m) => ({
+          message_id: m.id,
+          draft_id: ids.get(m.id),
+          ...Object.fromEntries(['From', 'To', 'Cc', 'Date', 'Subject'].map((h) => [h.toLowerCase(), header(m, h)])),
+          labels: m.labelIds,
+          body: bodyText(m.payload).slice(0, MAX_BODY_CHARS),
+          attachments: parts(m.payload).filter((p) => p.filename).map((p) => p.filename),
+        }));
+      },
+    );
 
     tool('mail_send_email', 'Send an email, or reply to a message', composeArgs, DESTRUCTIVE, async (args) => {
       const { id, threadId } = await gmail(args, 'POST', '/messages/send', await compose(args));
@@ -277,5 +302,19 @@ export default {
       await gmail(args, 'POST', `${thread(args.thread_id)}/trash`);
       return { ok: true };
     });
+
+    tool(
+      'mail_trash_message',
+      'Move one message to Trash, leaving the rest of its thread. Message IDs come from mail_get_thread. For a draft, use mail_delete_draft.',
+      { message_id: id, account },
+      DESTRUCTIVE,
+      async (args) => {
+        const message = `/messages/${encodeURIComponent(args.message_id)}`;
+        const msg = await gmail(args, 'GET', `${message}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`);
+        if (msg.labelIds?.includes('DRAFT')) throw new Error('That message is a draft; use mail_delete_draft with its draft_id from mail_get_thread');
+        await gmail(args, 'POST', `${message}/trash`);
+        return { ok: true, from: header(msg, 'From'), subject: header(msg, 'Subject') };
+      },
+    );
   },
 };

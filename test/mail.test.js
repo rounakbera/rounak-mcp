@@ -97,6 +97,7 @@ describe('mail', () => {
   test('rejects IDs that would change the request path', async () => {
     for (const thread_id of ['..', '.', '']) {
       await assert.rejects(call(client, 'mail_trash_thread', { account: OWNER, thread_id }), /non-empty ID/);
+      await assert.rejects(call(client, 'mail_trash_message', { account: OWNER, message_id: thread_id }), /non-empty ID/);
     }
     const args = { account: OWNER, reply_to_message_id: '..', body: 'x' };
     await assert.rejects(call(client, 'mail_create_draft', args), /non-empty ID/);
@@ -200,7 +201,7 @@ describe('mail', () => {
     const { tools } = await client.listTools();
     const destructive = tools.filter((t) => t.name.startsWith('mail_') && t.annotations.destructiveHint).map((t) => t.name);
     assert.deepEqual(destructive.sort(), [
-      'mail_delete_draft', 'mail_forward_message', 'mail_send_draft', 'mail_send_email', 'mail_trash_thread', 'mail_update_draft',
+      'mail_delete_draft', 'mail_forward_message', 'mail_send_draft', 'mail_send_email', 'mail_trash_message', 'mail_trash_thread', 'mail_update_draft',
     ]);
   });
 
@@ -210,5 +211,28 @@ describe('mail', () => {
     assert.deepEqual(ctx.google.mailbox(OWNER).threads[0].messages[0].labelIds, ['INBOX', 'STARRED']);
     await call(client, 'mail_trash_thread', { account: WORK, thread_id: 'w1' });
     assert.deepEqual(ctx.google.mailbox(WORK).threads[0].messages[0].labelIds, ['UNREAD', 'TRASH']);
+  });
+
+  test('trashes one message, leaving the rest of its thread', async () => {
+    const reply = gmailMessage({ id: 'm12', threadId: 't12', from: 'bob@example.com', subject: 'Re: plan', body: 'second' });
+    const first = gmailMessage({ id: 'm11', threadId: 't12', from: 'alice@example.com', subject: 'plan', body: 'first' });
+    ctx.google.mailbox(OWNER).threads.push({ id: 't12', messages: [first, reply] });
+    const trashed = await call(client, 'mail_trash_message', { account: OWNER, message_id: 'm12' });
+    assert.deepEqual(trashed, { ok: true, from: 'bob@example.com', subject: 'Re: plan' });
+    assert.deepEqual([first.labelIds, reply.labelIds], [['INBOX', 'UNREAD'], ['UNREAD', 'TRASH']]);
+    await assert.rejects(call(client, 'mail_trash_message', { account: OWNER, message_id: 'missing' }), /404/);
+  });
+
+  test('finds a draft reply in a thread and deletes it', async () => {
+    const sent = gmailMessage({ id: 'm21', threadId: 't21', from: 'alice@example.com', subject: 'lunch', body: 'lunch?' });
+    const draft = gmailMessage({ id: 'm22', threadId: 't21', from: OWNER, subject: 'Re: lunch', body: 'sure' });
+    draft.labelIds = ['DRAFT'];
+    ctx.google.mailbox(OWNER).threads.push({ id: 't21', messages: [sent, draft] });
+    ctx.google.mailbox(OWNER).drafts.push({ id: 'd21', message: draft });
+    const messages = await call(client, 'mail_get_thread', { account: OWNER, thread_id: 't21' });
+    assert.deepEqual(messages.map((m) => [m.message_id, m.draft_id]), [['m21', undefined], ['m22', 'd21']]);
+    await assert.rejects(call(client, 'mail_trash_message', { account: OWNER, message_id: 'm22' }), /mail_delete_draft/);
+    await call(client, 'mail_delete_draft', { account: OWNER, draft_id: 'd21' });
+    assert.ok(!ctx.google.mailbox(OWNER).drafts.some((d) => d.id === 'd21'));
   });
 });
