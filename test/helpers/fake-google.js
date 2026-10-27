@@ -136,6 +136,12 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
       box.drafts.splice(box.drafts.indexOf(d), 1);
       return [204, ''];
     }],
+    ['POST', /^\/messages\/([^/]+)\/trash$/, (box, m) => {
+      const msg = box.threads.flatMap((t) => t.messages).find((x) => x.id === m[1]);
+      if (!msg) return NOT_FOUND;
+      msg.labelIds = [...msg.labelIds.filter((l) => l !== 'INBOX'), 'TRASH'];
+      return msg;
+    }],
     ['POST', /^\/threads\/([^/]+)\/(modify|trash)$/, (box, m, { json }) => {
       const t = box.threads.find((x) => x.id === m[1]);
       const [add, remove] = m[2] === 'trash' ? [['TRASH'], ['INBOX']] : [json.addLabelIds, json.removeLabelIds];
