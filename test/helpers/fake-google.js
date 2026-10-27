@@ -94,6 +94,7 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     },
   };
 
+  const NOT_FOUND = [404, { error: { message: 'Not Found' } }];
   const gmailRoutes = [
     ['GET', /^\/threads$/, (box, _m, { query }) => [200, { threads: box.threads.filter((t) => t.messages.some((x) => x.snippet.includes(query.get('q')))).map(({ id }) => ({ id })) }]],
     ['GET', /^\/threads\/([^/]+)$/, (box, m) => box.threads.find((t) => t.id === m[1])],
@@ -101,7 +102,33 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
     ['GET', /^\/messages\/([^/]+)$/, (box, m) => box.threads.flatMap((t) => t.messages).find((x) => x.id === m[1])],
     ['GET', /^\/labels$/, () => [200, { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_1', name: 'Receipts', type: 'user' }] }]],
     ['POST', /^\/messages\/send$/, (box, _m, { json }) => (box.sent.push(json), [200, { id: `sent-${box.sent.length}`, threadId: json.threadId }])],
-    ['POST', /^\/drafts$/, (box, _m, { json }) => (box.drafts.push(json), [200, { id: `draft-${box.drafts.length}`, message: json.message }])],
+    ['POST', /^\/drafts$/, (box, _m, { json }) => {
+      const d = { id: `draft-${box.drafts.length + 1}`, message: { id: `dm-${box.drafts.length + 1}`, ...json.message } };
+      box.drafts.push(d);
+      return d;
+    }],
+    ['GET', /^\/drafts$/, (box) => [200, { drafts: box.drafts.map(({ id, message }) => ({ id, message: { id: message.id, threadId: message.threadId } })) }]],
+    ['POST', /^\/drafts\/send$/, (box, _m, { json }) => {
+      const d = box.drafts.find((x) => x.id === json.id);
+      if (!d) return NOT_FOUND;
+      box.drafts.splice(box.drafts.indexOf(d), 1);
+      box.sent.push(d.message);
+      return [200, { id: `sent-${box.sent.length}`, threadId: d.message.threadId }];
+    }],
+    // Drafts are stored as the API takes them (`raw`) or as seeded (`payload`); updates replace the message.
+    ['GET', /^\/drafts\/([^/]+)$/, (box, m) => box.drafts.find((x) => x.id === m[1]) ?? NOT_FOUND],
+    ['PUT', /^\/drafts\/([^/]+)$/, (box, m, { json }) => {
+      const d = box.drafts.find((x) => x.id === m[1]);
+      if (!d) return NOT_FOUND;
+      d.message = { id: `${d.message.id}-v2`, ...json.message };
+      return d;
+    }],
+    ['DELETE', /^\/drafts\/([^/]+)$/, (box, m) => {
+      const d = box.drafts.find((x) => x.id === m[1]);
+      if (!d) return NOT_FOUND;
+      box.drafts.splice(box.drafts.indexOf(d), 1);
+      return [204, ''];
+    }],
     ['POST', /^\/threads\/([^/]+)\/(modify|trash)$/, (box, m, { json }) => {
       const t = box.threads.find((x) => x.id === m[1]);
       const [add, remove] = m[2] === 'trash' ? [['TRASH'], ['INBOX']] : [json.addLabelIds, json.removeLabelIds];
@@ -111,7 +138,6 @@ export async function startFakeGoogle({ clientId, clientSecret }) {
   ];
 
   // Calendar: `primary` aliases the primary calendar; unknown calendars and events are 404s.
-  const NOT_FOUND = [404, { error: { message: 'Not Found' } }];
   const calOf = (acct, id) => acct.calendars.find((c) => c.id === decodeURIComponent(id) || (c.primary && id === 'primary'));
   const eventsOf = (acct, id) => {
     const c = calOf(acct, id);

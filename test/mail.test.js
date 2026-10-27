@@ -100,12 +100,78 @@ describe('mail', () => {
     }
     const args = { account: OWNER, reply_to_message_id: '..', body: 'x' };
     await assert.rejects(call(client, 'mail_create_draft', args), /non-empty ID/);
+    for (const tool of ['mail_get_draft', 'mail_update_draft', 'mail_send_draft', 'mail_delete_draft']) {
+      await assert.rejects(call(client, tool, { account: OWNER, draft_id: '..' }), /non-empty ID/);
+    }
   });
 
   test('creates a draft with a UTF-8 subject', async () => {
     await call(client, 'mail_create_draft', { account: WORK, to: 'bob@corp.example', subject: 'Café ☕', body: 'draft' });
     const mime = decodeRaw(ctx.google.mailbox(WORK).drafts[0].message.raw);
     assert.ok(mime.includes(`Subject: =?UTF-8?B?${Buffer.from('Café ☕').toString('base64')}?=\r\n`));
+  });
+
+  // A reply draft as Gmail returns it, with an attachment.
+  const seedDraft = (id) => {
+    const message = gmailMessage({ id: `${id}-msg`, threadId: 't1', from: OWNER, subject: 'Re: Your invoice', body: 'Draft text' });
+    const extra = { To: 'Alice <alice@example.com>', Cc: 'cc@example.com', Bcc: 'bcc@example.com', 'In-Reply-To': '<m1@example.com>', References: '<m1@example.com>' };
+    message.payload.headers.push(...Object.entries(extra).map(([name, value]) => ({ name, value })));
+    ctx.google.mailbox(OWNER).drafts.push({ id, message });
+  };
+
+  test('lists and reads drafts', async () => {
+    seedDraft('d1');
+    const list = await call(client, 'mail_list_drafts', {});
+    const d1 = list.find((d) => d.draft_id === 'd1');
+    assert.deepEqual([d1.account, d1.thread_id, d1.to, d1.subject, d1.snippet], [OWNER, 't1', 'Alice <alice@example.com>', 'Re: Your invoice', 'Draft text']);
+    assert.ok(list.some((d) => d.account === WORK));
+    const draft = await call(client, 'mail_get_draft', { account: OWNER, draft_id: 'd1' });
+    assert.deepEqual([draft.bcc, draft.body, draft.attachments], ['bcc@example.com', 'Draft text', ['invoice.pdf']]);
+  });
+
+  test('updates a draft, keeping unchanged fields, threading and attachments', async () => {
+    seedDraft('d2');
+    const updated = await call(client, 'mail_update_draft', { account: OWNER, draft_id: 'd2', body: 'New text', cc: '' });
+    assert.deepEqual([updated.draft_id, updated.thread_id], ['d2', 't1']);
+    const { message } = ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd2');
+    assert.equal(message.threadId, 't1');
+    const mime = decodeRaw(message.raw);
+    assert.match(mime, /^To: Alice <alice@example\.com>\r$/m);
+    assert.match(mime, /^Bcc: bcc@example\.com\r$/m);
+    assert.doesNotMatch(mime, /^Cc:/m);
+    assert.match(mime, /^Subject: Re: Your invoice\r$/m);
+    assert.match(mime, /^In-Reply-To: <m1@example\.com>\r$/m);
+    assert.match(mime, /^References: <m1@example\.com>\r$/m);
+    const boundary = mime.match(/boundary="([^"]+)"/)[1];
+    const [, text, file] = mime.split(`--${boundary}`);
+    assert.equal(Buffer.from(text.split('\r\n\r\n')[1], 'base64').toString(), 'New text');
+    assert.match(file, /filename="invoice\.pdf"/);
+  });
+
+  test('rejects header injection when updating a draft', async () => {
+    seedDraft('d3');
+    const args = { account: OWNER, draft_id: 'd3', subject: 'hi\r\nBcc: spy@evil.example' };
+    await assert.rejects(call(client, 'mail_update_draft', args), /line breaks/);
+    assert.equal(ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd3').message.raw, undefined);
+  });
+
+  test('sends and deletes drafts', async () => {
+    seedDraft('d4');
+    const sent = await call(client, 'mail_send_draft', { account: OWNER, draft_id: 'd4' });
+    assert.deepEqual([sent.thread_id, sent.to, sent.bcc], ['t1', 'Alice <alice@example.com>', 'bcc@example.com']);
+    seedDraft('d5');
+    assert.deepEqual(await call(client, 'mail_delete_draft', { account: OWNER, draft_id: 'd5' }), { ok: true });
+    const ids = ctx.google.mailbox(OWNER).drafts.map((d) => d.id);
+    assert.ok(!ids.includes('d4') && !ids.includes('d5'));
+    await assert.rejects(call(client, 'mail_delete_draft', { account: OWNER, draft_id: 'd5' }), /404/);
+  });
+
+  test('marks tools that send, overwrite or delete as destructive', async () => {
+    const { tools } = await client.listTools();
+    const destructive = tools.filter((t) => t.name.startsWith('mail_') && t.annotations.destructiveHint).map((t) => t.name);
+    assert.deepEqual(destructive.sort(), [
+      'mail_delete_draft', 'mail_forward_message', 'mail_send_draft', 'mail_send_email', 'mail_trash_thread', 'mail_update_draft',
+    ]);
   });
 
   test('lists labels, modifies and trashes threads', async () => {
