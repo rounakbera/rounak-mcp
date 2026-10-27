@@ -31,33 +31,28 @@ export function partText(payload, mimeType) {
 // HTML longer than this isn't converted in full; the text returned is capped far below it anyway.
 const MAX_HTML_CHARS = 200_000;
 
-// Removes <style> and <script> elements with indexOf, avoiding a regex that backtracks on
-// unclosed tags.
-function stripElements(html, names) {
-  const lower = html.toLowerCase();
-  // Each name's next opening tag; searched again only once the scan has passed it, so it stays linear.
-  const next = new Map(names.map((n) => [n, -1]));
+// Removes comments and <style> and <script> elements, which mail clients don't show. It searches
+// the original case-insensitively: positions from a lowercased copy can be off, as lowercasing can
+// change a string's length. Each search moves forward, so it runs in linear time, and an unclosed
+// element keeps the text after it rather than hiding it.
+function stripHidden(html) {
+  const open = /<!--|<(style|script)(?=[\s>/])/gi;
   let out = '';
   let i = 0;
-  for (;;) {
-    for (const [n, at] of next) {
-      if (at >= i) continue;
-      const found = lower.indexOf(`<${n}`, i);
-      next.set(n, found < 0 ? Infinity : found);
-    }
-    const [name, at] = [...next].reduce((a, b) => (b[1] < a[1] ? b : a));
-    if (at === Infinity) return out + html.slice(i);
-    const end = lower.indexOf(`</${name}>`, at);
-    out += html.slice(i, at);
-    if (end < 0) return out;
-    i = end + name.length + 3;
+  for (let m; (m = open.exec(html)); ) {
+    const close = m[1] ? new RegExp(`</${m[1]}\\s*>`, 'gi') : /-->/g;
+    close.lastIndex = open.lastIndex;
+    if (!close.exec(html)) break;
+    out += html.slice(i, m.index);
+    i = open.lastIndex = close.lastIndex;
   }
+  return out + html.slice(i);
 }
 
 // Plain text from HTML, keeping its line and paragraph breaks. Every pattern here runs in linear time.
 export const htmlText = (html) =>
   unescapeHtml(
-    stripElements(html.slice(0, MAX_HTML_CHARS), ['style', 'script'])
+    stripHidden(html.slice(0, MAX_HTML_CHARS))
       .replace(/<br[^<>]*>|<\/(?:p|div|li|tr|h\d|blockquote)\s*>/gi, '\n')
       .replace(/<[^<>]*>/g, '')
       .replace(/&nbsp;/g, ' '),

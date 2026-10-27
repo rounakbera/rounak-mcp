@@ -244,6 +244,21 @@ describe('mail', () => {
     assert.doesNotMatch(mime, /multipart\/alternative/);
   });
 
+  test("hides only what mail clients hide when reading a draft's HTML", async () => {
+    const b64 = (t) => Buffer.from(t).toString('base64url');
+    const cases = [
+      // Lowercasing İ adds a character, so positions from a lowercased copy would cut the wrong text.
+      [`<div>${'İ'.repeat(25)}</div><style>p{}</style><p>Please do NOT wire the money.</p>`, `${'İ'.repeat(25)}\nPlease do NOT wire the money.`],
+      ['<p>a</p><STYLE type="x">x</style ><!-- <style> --><styles>b</styles><script>c()</SCRIPT>d', 'a\nbd'],
+      ['a<style>unclosed', 'aunclosed'],
+    ];
+    for (const [i, [html, text]] of cases.entries()) {
+      const message = { id: `d4${i}-msg`, threadId: 't1', labelIds: ['DRAFT'], payload: { mimeType: 'text/html', headers: [], body: { data: b64(html) } } };
+      ctx.google.mailbox(OWNER).drafts.push({ id: `d4${i}`, message });
+      assert.equal((await call(client, 'mail_get_draft', { account: OWNER, draft_id: `d4${i}` })).body, text);
+    }
+  });
+
   test('reads hostile draft HTML quickly and without crashing', async () => {
     const b64 = (t) => Buffer.from(t).toString('base64url');
     for (const [id, html] of [['d35', '<'.repeat(1e6)], ['d36', '<style'.repeat(2e5)], ['d37', 'a&#99999999;b']]) {
