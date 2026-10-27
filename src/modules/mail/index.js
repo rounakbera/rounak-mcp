@@ -172,6 +172,9 @@ export default {
         const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=full`);
         const current = recipients(message);
         const raw = rawMessage({
+          // Gmail sends from a send-as alias only if it's in From, so From and Reply-To are kept.
+          from: header(message, 'From'),
+          replyTo: header(message, 'Reply-To'),
           to: args.to ?? current.to,
           cc: args.cc ?? current.cc,
           bcc: args.bcc ?? current.bcc,
@@ -186,11 +189,17 @@ export default {
       },
     );
 
-    tool('mail_send_draft', 'Send a draft', { draft_id: id, account }, DESTRUCTIVE, async (args) => {
-      const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=metadata`);
-      const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
-      return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
-    });
+    tool(
+      'mail_send_draft',
+      'Send a draft. The approval prompt shows only the draft ID, so first show the user the draft (mail_get_draft).',
+      { draft_id: id, account },
+      DESTRUCTIVE,
+      async (args) => {
+        const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=metadata`);
+        const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
+        return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
+      },
+    );
 
     tool('mail_delete_draft', 'Permanently delete a draft. It does not go to Trash.', { draft_id: id, account }, DESTRUCTIVE, async (args) => {
       await gmail(args, 'DELETE', draftPath(args.draft_id));

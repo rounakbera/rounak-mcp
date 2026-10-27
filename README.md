@@ -42,7 +42,7 @@ deploy/              systemd user units, install.sh, hourly update.sh
 - **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread`,
   `mail_send_email` (also handles replies), `mail_forward_message` (with attachments, kept in the
   original thread), `mail_create_draft`, `mail_list_drafts`, `mail_get_draft`, `mail_update_draft`
-  (keeps reply threading and attachments), `mail_send_draft`, `mail_delete_draft`,
+  (keeps the sender, reply threading and attachments), `mail_send_draft`, `mail_delete_draft`,
   `mail_list_labels`, `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`
 - **calendar:** `calendar_list_calendars`, `calendar_list_events` (merges calendars across all
   accounts by default), `calendar_get_event`, `calendar_create_event`, `calendar_update_event`,
@@ -148,6 +148,8 @@ server won't start while any value is still `REPLACE_ME`.
   going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit. The approval
   prompt for a forward shows the message ID, not its contents, so check what's being forwarded,
   especially when the request came from an email.
+- In the same way, the approval prompt for sending a draft shows only the draft ID. Creating a draft
+  doesn't need approval, so check a draft's recipients and text before approving its send.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at

@@ -114,7 +114,7 @@ describe('mail', () => {
   // A reply draft as Gmail returns it, with an attachment.
   const seedDraft = (id) => {
     const message = gmailMessage({ id: `${id}-msg`, threadId: 't1', from: OWNER, subject: 'Re: Your invoice', body: 'Draft text' });
-    const extra = { To: 'Alice <alice@example.com>', Cc: 'cc@example.com', Bcc: 'bcc@example.com', 'In-Reply-To': '<m1@example.com>', References: '<m1@example.com>' };
+    const extra = { 'Reply-To': 'replies@example.com', To: 'Alice <alice@example.com>', Cc: 'cc@example.com', Bcc: 'bcc@example.com', 'In-Reply-To': '<m1@example.com>', References: '<m1@example.com>' };
     message.payload.headers.push(...Object.entries(extra).map(([name, value]) => ({ name, value })));
     ctx.google.mailbox(OWNER).drafts.push({ id, message });
   };
@@ -131,11 +131,15 @@ describe('mail', () => {
 
   test('updates a draft, keeping unchanged fields, threading and attachments', async () => {
     seedDraft('d2');
+    const d2 = ctx.google.mailbox(OWNER).drafts.at(-1);
+    d2.message.payload.headers.find((h) => h.name === 'From').value = 'Alias <alias@example.com>';
     const updated = await call(client, 'mail_update_draft', { account: OWNER, draft_id: 'd2', body: 'New text', cc: '' });
     assert.deepEqual([updated.draft_id, updated.thread_id], ['d2', 't1']);
     const { message } = ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd2');
     assert.equal(message.threadId, 't1');
     const mime = decodeRaw(message.raw);
+    assert.match(mime, /^From: Alias <alias@example\.com>\r$/m);
+    assert.match(mime, /^Reply-To: replies@example\.com\r$/m);
     assert.match(mime, /^To: Alice <alice@example\.com>\r$/m);
     assert.match(mime, /^Bcc: bcc@example\.com\r$/m);
     assert.doesNotMatch(mime, /^Cc:/m);
