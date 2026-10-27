@@ -33,11 +33,13 @@ function attachmentPart({ filename, mimeType, data }) {
 }
 
 // Returns the base64url `raw` value the Gmail API expects: plain text, or multipart/mixed with attachments.
-export function rawMessage({ to, cc, bcc, subject, body, inReplyTo, references, attachments = [] }) {
-  if ([to, cc, bcc, subject, inReplyTo, references].some((v) => /[\r\n]/.test(v ?? ''))) {
+export function rawMessage({ from, replyTo, to, cc, bcc, subject, body, inReplyTo, references, attachments = [] }) {
+  if ([from, replyTo, to, cc, bcc, subject, inReplyTo, references].some((v) => /[\r\n]/.test(v ?? ''))) {
     throw new Error('Header values must not contain line breaks');
   }
   const headers = Object.entries({
+    From: from,
+    'Reply-To': replyTo,
     To: to,
     Cc: cc,
     Bcc: bcc,

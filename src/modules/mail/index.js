@@ -24,10 +24,16 @@ export default {
     const api = (email, method, path, body) => google.request(email, method, `${google.endpoints.gmail}${path}`, body);
     const gmail = (args, method, path, body) => api(resolve(args.account), method, path, body);
     const thread = (id) => `/threads/${encodeURIComponent(id)}`;
+    const draftPath = (id) => `/drafts/${encodeURIComponent(id)}`;
+    // A header value compared as written, ignoring only case and spacing. Parsing addresses out of it
+    // instead would let quoted or commented addresses differ from what the approval prompt shows.
+    const normalized = (value) => (value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const recipients = (msg) => Object.fromEntries(['To', 'Cc', 'Bcc', 'Subject'].map((h) => [h.toLowerCase(), header(msg, h)]));
 
     // Builds the Gmail API message, filling reply headers from the original when replying.
     async function compose(args) {
-      const fields = { ...args };
+      const { to, cc, bcc, subject, body } = args;
+      const fields = { to, cc, bcc, subject, body };
       let threadId;
       if (args.reply_to_message_id) {
         const meta = ['Message-ID', 'References', 'Subject', 'From', 'Reply-To'].map((h) => `metadataHeaders=${h}`).join('&');
@@ -42,6 +48,19 @@ export default {
       }
       if (!fields.to) throw new Error('`to` is required unless replying');
       return { raw: rawMessage(fields), threadId };
+    }
+
+    // Downloads a message's attachments, so they can be sent again in a new message.
+    async function attachmentsOf(args, msg) {
+      const files = parts(msg.payload).filter((p) => p.filename && (p.body?.attachmentId || p.body?.data));
+      if (files.reduce((n, p) => n + (p.body.size ?? 0), 0) > MAX_ATTACHMENT_BYTES) throw new Error('Attachments are over 25 MB');
+      const path = `/messages/${encodeURIComponent(msg.id)}/attachments/`;
+      return Promise.all(
+        files.map(async (p) => {
+          const { data } = p.body.data ? p.body : await gmail(args, 'GET', path + encodeURIComponent(p.body.attachmentId));
+          return { filename: p.filename, mimeType: p.mimeType, data: Buffer.from(data, 'base64url') };
+        }),
+      );
     }
 
     tool(
@@ -103,6 +122,109 @@ export default {
     });
 
     tool(
+      'mail_list_drafts',
+      'List drafts, optionally filtered with Gmail query syntax. Lists every linked account unless `account` is given.',
+      {
+        query: z.string().optional().describe('Gmail search query, e.g. "to:alice"'),
+        account,
+        max_results: z.number().int().min(1).max(50).default(10).describe('Per account'),
+      },
+      READ,
+      async ({ query, account: email, max_results }) => {
+        const results = await Promise.all(
+          (email ? [resolve(email)] : linked()).map(async (acct) => {
+            const q = new URLSearchParams({ maxResults: max_results, ...(query && { q: query }) });
+            const { drafts = [] } = await api(acct, 'GET', `/drafts?${q}`);
+            return Promise.all(
+              drafts.map(async ({ id }) => {
+                const { message } = await api(acct, 'GET', `${draftPath(id)}?format=metadata`);
+                return { account: acct, draft_id: id, thread_id: message.threadId, ...recipients(message), snippet: unescapeHtml(message.snippet) };
+              }),
+            );
+          }),
+        );
+        return results.flat();
+      },
+    );
+
+    tool('mail_get_draft', 'Read a draft', { draft_id: id, account }, READ, async (args) => {
+      const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=full`);
+      return {
+        draft_id: args.draft_id,
+        thread_id: message.threadId,
+        ...recipients(message),
+        body: bodyText(message.payload).slice(0, MAX_BODY_CHARS),
+        attachments: parts(message.payload).filter((p) => p.filename).map((p) => p.filename),
+      };
+    });
+
+    tool(
+      'mail_update_draft',
+      'Change a draft. Fields left out keep their current value; pass an empty string to clear one. The draft is saved as plain text, so formatting from Gmail is lost. Reply threading and attachments are kept.',
+      {
+        draft_id: id,
+        account,
+        to: z.string().optional().describe('Comma-separated recipients'),
+        cc: z.string().optional(),
+        bcc: z.string().optional(),
+        subject: z.string().optional(),
+        body: z.string().optional().describe('Plain-text body; replaces the whole body'),
+      },
+      // It overwrites the draft and can change who it goes to when sent, so it needs confirming.
+      DESTRUCTIVE,
+      async (args) => {
+        const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=full`);
+        const current = recipients(message);
+        const raw = rawMessage({
+          // Gmail sends from a send-as alias only if it's in From, so From and Reply-To are kept.
+          from: header(message, 'From'),
+          replyTo: header(message, 'Reply-To'),
+          to: args.to ?? current.to,
+          cc: args.cc ?? current.cc,
+          bcc: args.bcc ?? current.bcc,
+          subject: args.subject ?? current.subject,
+          body: args.body ?? bodyText(message.payload),
+          inReplyTo: header(message, 'In-Reply-To'),
+          references: header(message, 'References'),
+          attachments: await attachmentsOf(args, message),
+        });
+        const updated = await gmail(args, 'PUT', draftPath(args.draft_id), { message: { raw, threadId: message.threadId } });
+        return { draft_id: updated.id, thread_id: updated.message?.threadId };
+      },
+    );
+
+    // The recipients are required so the approval prompt shows them; a draft ID alone could hide who it goes to.
+    tool(
+      'mail_send_draft',
+      "Send a draft. `to`, `cc` and `bcc` must be exactly the draft's To, Cc and Bcc as mail_get_draft shows them, or nothing is sent.",
+      {
+        draft_id: id,
+        account,
+        to: z.string().describe("The draft's To recipients"),
+        cc: z.string().default('').describe("The draft's Cc recipients, if any"),
+        bcc: z.string().default('').describe("The draft's Bcc recipients, if any"),
+      },
+      DESTRUCTIVE,
+      async (args) => {
+        const { message } = await gmail(args, 'GET', `${draftPath(args.draft_id)}?format=metadata`);
+        const current = recipients(message);
+        const mismatched = ['to', 'cc', 'bcc'].filter((f) => normalized(args[f]) !== normalized(current[f]));
+        if (mismatched.length) throw new Error(`The draft's ${mismatched.join(', ')} differ from what was given; nothing was sent`);
+        // Invisible or direction-changing characters, or a very long list, could hide a recipient in the prompt.
+        if (['to', 'cc', 'bcc'].some((f) => /[\p{Cc}\p{Cf}]/u.test(current[f] ?? '') || (current[f] ?? '').length > 2000)) {
+          throw new Error("The draft's recipients contain hidden characters or are too long to check; nothing was sent");
+        }
+        const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
+        return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
+      },
+    );
+
+    tool('mail_delete_draft', 'Permanently delete a draft. It does not go to Trash.', { draft_id: id, account }, DESTRUCTIVE, async (args) => {
+      await gmail(args, 'DELETE', draftPath(args.draft_id));
+      return { ok: true };
+    });
+
+    tool(
       'mail_forward_message',
       'Forward a message, including its attachments, to new recipients. The forward stays in the original thread.',
       {
@@ -115,18 +237,8 @@ export default {
       },
       DESTRUCTIVE,
       async (args) => {
-        const message = `/messages/${encodeURIComponent(args.message_id)}`;
-        const orig = await gmail(args, 'GET', `${message}?format=full`);
-        const files = parts(orig.payload).filter((p) => p.filename && (p.body?.attachmentId || p.body?.data));
-        if (files.reduce((n, p) => n + (p.body.size ?? 0), 0) > MAX_ATTACHMENT_BYTES) {
-          throw new Error('Attachments are over 25 MB, too large to forward');
-        }
-        const attachments = await Promise.all(
-          files.map(async (p) => {
-            const { data } = p.body.data ? p.body : await gmail(args, 'GET', `${message}/attachments/${encodeURIComponent(p.body.attachmentId)}`);
-            return { filename: p.filename, mimeType: p.mimeType, data: Buffer.from(data, 'base64url') };
-          }),
-        );
+        const orig = await gmail(args, 'GET', `/messages/${encodeURIComponent(args.message_id)}?format=full`);
+        const attachments = await attachmentsOf(args, orig);
         const subject = header(orig, 'Subject') ?? '';
         const messageId = header(orig, 'Message-ID');
         const quoted = ['From', 'Date', 'Subject', 'To', 'Cc'].filter((h) => header(orig, h)).map((h) => `${h}: ${header(orig, h)}`);
@@ -141,7 +253,7 @@ export default {
           attachments,
         });
         const sent = await gmail(args, 'POST', '/messages/send', { raw, threadId: orig.threadId });
-        return { message_id: sent.id, thread_id: sent.threadId, to: args.to, cc: args.cc, bcc: args.bcc, attachments: files.map((p) => p.filename) };
+        return { message_id: sent.id, thread_id: sent.threadId, to: args.to, cc: args.cc, bcc: args.bcc, attachments: attachments.map((a) => a.filename) };
       },
     );
 

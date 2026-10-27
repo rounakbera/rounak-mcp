@@ -41,8 +41,9 @@ deploy/              systemd user units, install.sh, hourly update.sh
 - **Core:** `list_accounts`
 - **mail:** `mail_search_threads` (searches all accounts by default), `mail_get_thread`,
   `mail_send_email` (also handles replies), `mail_forward_message` (with attachments, kept in the
-  original thread), `mail_create_draft`, `mail_list_labels`,
-  `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`
+  original thread), `mail_create_draft`, `mail_list_drafts`, `mail_get_draft`, `mail_update_draft`
+  (keeps the sender, reply threading and attachments), `mail_send_draft`, `mail_delete_draft`,
+  `mail_list_labels`, `mail_modify_thread` (archive, read, star, labels), `mail_trash_thread`
 - **calendar:** `calendar_list_calendars`, `calendar_list_events` (merges calendars across all
   accounts by default), `calendar_get_event`, `calendar_create_event`, `calendar_update_event`,
   `calendar_delete_event`, `calendar_respond_to_event`, `calendar_find_free_time`
@@ -132,19 +133,24 @@ server won't start while any value is still `REPLACE_ME`.
 
 **Data**
 - Linked accounts' Google refresh tokens live in `$DATA_DIR/state.enc` (AES-256-GCM, file mode `0600`).
-- The mail module's scope is `gmail.modify`: read, send, label and trash, but no permanent delete and
-  no settings changes.
+- The mail module's scope is `gmail.modify`: read, send, label and trash, but no settings changes.
+  The only permanent delete is of drafts; messages and threads can only go to Trash.
 - The calendar module's scopes are `calendar.events`, `calendar.calendarlist.readonly` and
   `calendar.freebusy`: it can read and edit events, but it can't create, delete or share calendars.
   Inviting attendees shares an event's details with them; `send_updates` only controls whether
   they're also emailed.
-- Sending, forwarding, trashing, and every calendar write (creating, changing, deleting and
-  responding to events) are marked `destructiveHint`, so Claude asks before doing them. Each of these
-  can reach people outside the account.
+- Sending (including sending a draft), forwarding, trashing, changing or deleting drafts, and
+  every calendar write (creating, changing, deleting and responding to events) are marked
+  `destructiveHint`, so Claude asks before doing them. Each of these either can reach people
+  outside the account or can't be undone. Changing a draft counts because it can quietly change
+  who the draft goes to when you later send it from Gmail.
 - Forwarded attachments' names and types come from the original sender, so they're sanitised before
   going into MIME headers, and forwards are capped at Gmail's 25 MB attachment limit. The approval
   prompt for a forward shows the message ID, not its contents, so check what's being forwarded,
   especially when the request came from an email.
+- Creating a draft doesn't need approval, so `mail_send_draft` must be given the draft's To, Cc and
+  Bcc, and refuses to send if they don't match. The approval prompt therefore shows where the draft
+  goes; check its text with `mail_get_draft` before approving.
 - IDs placed in Google API URLs are validated and encoded, and `.` and `..` are rejected, so a tool
   call can't move its request to a different endpoint.
 - The maps module's tools are read-only. They fetch only the lists in `MAPS_LIST_IDS` (validated at
