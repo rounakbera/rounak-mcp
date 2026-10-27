@@ -9,23 +9,57 @@ export const parts = (part) => [part, ...(part?.parts ?? []).flatMap(parts)];
 // Gmail returns snippets HTML-escaped.
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 export const unescapeHtml = (s) =>
-  s?.replace(/&(#\d+|[a-z]+);/g, (m, e) => (e[0] === '#' ? String.fromCodePoint(Number(e.slice(1))) : ENTITIES[e] ?? m));
+  s?.replace(/&(#\d{1,7}|[a-z]+);/g, (m, e) => {
+    if (e[0] !== '#') return ENTITIES[e] ?? m;
+    const code = Number(e.slice(1));
+    return code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
 
 const decode = (data) => Buffer.from(data, 'base64url').toString();
 
-// The decoded text of a message's first `text/plain` or `text/html` part.
+// A message's own body parts: attachments and forwarded messages (message/*) are skipped, so their
+// content is never taken for the message's own text.
+const bodyParts = (part) =>
+  part?.filename || /^message\//i.test(part?.mimeType ?? '') ? [] : [part, ...(part?.parts ?? []).flatMap(bodyParts)];
+
+// The decoded text of a message's own first `text/plain` or `text/html` part.
 export function partText(payload, mimeType) {
-  const part = parts(payload).find((p) => p.mimeType === mimeType && p.body?.data);
+  const part = bodyParts(payload).find((p) => p.mimeType === mimeType && p.body?.data);
   return part && decode(part.body.data);
 }
 
-// Plain text from HTML, keeping its line and paragraph breaks.
+// HTML longer than this isn't converted in full; the text returned is capped far below it anyway.
+const MAX_HTML_CHARS = 200_000;
+
+// Removes <style> and <script> elements with indexOf, avoiding a regex that backtracks on
+// unclosed tags.
+function stripElements(html, names) {
+  const lower = html.toLowerCase();
+  // Each name's next opening tag; searched again only once the scan has passed it, so it stays linear.
+  const next = new Map(names.map((n) => [n, -1]));
+  let out = '';
+  let i = 0;
+  for (;;) {
+    for (const [n, at] of next) {
+      if (at >= i) continue;
+      const found = lower.indexOf(`<${n}`, i);
+      next.set(n, found < 0 ? Infinity : found);
+    }
+    const [name, at] = [...next].reduce((a, b) => (b[1] < a[1] ? b : a));
+    if (at === Infinity) return out + html.slice(i);
+    const end = lower.indexOf(`</${name}>`, at);
+    out += html.slice(i, at);
+    if (end < 0) return out;
+    i = end + name.length + 3;
+  }
+}
+
+// Plain text from HTML, keeping its line and paragraph breaks. Every pattern here runs in linear time.
 export const htmlText = (html) =>
   unescapeHtml(
-    html
-      .replace(/<(style|script)[^>]*>[^]*?<\/\1>/gi, '')
-      .replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d|blockquote)>/gi, '\n')
-      .replace(/<[^>]*>/g, '')
+    stripElements(html.slice(0, MAX_HTML_CHARS), ['style', 'script'])
+      .replace(/<br[^<>]*>|<\/(?:p|div|li|tr|h\d|blockquote)\s*>/gi, '\n')
+      .replace(/<[^<>]*>/g, '')
       .replace(/&nbsp;/g, ' '),
   )
     .replace(/[ \t]+/g, ' ')
@@ -37,7 +71,7 @@ export function bodyText(payload) {
   const plain = partText(payload, 'text/plain');
   if (plain) return plain;
   const html = partText(payload, 'text/html');
-  return html ? html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+  return html ? html.slice(0, MAX_HTML_CHARS).replace(/<[^<>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
 }
 
 // A draft's text. Gmail hard-wraps the plain-text copy of drafts written in Gmail, so the HTML is

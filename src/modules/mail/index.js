@@ -266,7 +266,8 @@ export default {
       DESTRUCTIVE,
       async (args) => {
         const orig = await gmail(args, 'GET', `/messages/${encodeURIComponent(args.message_id)}?format=full`);
-        const attachments = await attachmentsOf(args, orig);
+        // Inline image IDs only mean something to the original's HTML, which a forward doesn't carry.
+        const attachments = (await attachmentsOf(args, orig)).map(({ contentId, ...a }) => a);
         const subject = header(orig, 'Subject') ?? '';
         const messageId = header(orig, 'Message-ID');
         const quoted = ['From', 'Date', 'Subject', 'To', 'Cc'].filter((h) => header(orig, h)).map((h) => `${h}: ${header(orig, h)}`);

@@ -78,6 +78,16 @@ describe('mail', () => {
     assert.match(mime, /filename\*=UTF-8''y{199}%EF%BF%BD\r\n/);
   });
 
+  test("doesn't carry the original's inline image IDs into a forward", async () => {
+    const msg = gmailMessage({ id: 'm40', threadId: 't40', from: 'eve@example.com', subject: 'pic', body: 'x' });
+    msg.payload.parts[1] = { mimeType: 'image/png', filename: 'pic.png', headers: [{ name: 'Content-ID', value: '<ii_9>' }], body: { data: 'eA', size: 1 } };
+    ctx.google.mailbox(OWNER).threads.push({ id: 't40', messages: [msg] });
+    await call(client, 'mail_forward_message', { account: OWNER, message_id: 'm40', to: 'carol@example.com' });
+    const mime = decodeRaw(ctx.google.mailbox(OWNER).sent.at(-1).raw);
+    assert.match(mime, /Content-Disposition: attachment; filename="pic\.png"/);
+    assert.doesNotMatch(mime, /Content-ID/);
+  });
+
   test('refuses to forward attachments over 25 MB', async () => {
     const msg = gmailMessage({ id: 'm10', threadId: 't10', from: 'eve@example.com', subject: 'big', body: 'x' });
     msg.payload.parts[1].body.size = 26 * 1024 * 1024;
@@ -208,6 +218,42 @@ describe('mail', () => {
     const mime = decodeRaw(ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd33').message.raw);
     assert.deepEqual(leafParts(mime).map((p) => p.type), ['text/plain', 'image/png']);
     assert.equal(leafParts(mime)[0].text, 'New text');
+  });
+
+  test("ignores attachments' and forwarded messages' HTML when reading or updating a draft", async () => {
+    const b64 = (t) => Buffer.from(t).toString('base64url');
+    const message = {
+      id: 'd34-msg',
+      threadId: 't1',
+      labelIds: ['DRAFT'],
+      payload: {
+        mimeType: 'multipart/mixed',
+        headers: [{ name: 'To', value: 'jess@example.com' }],
+        parts: [
+          { mimeType: 'text/plain', body: { data: b64('my own text') } },
+          { mimeType: 'message/rfc822', filename: 'fwd.eml', body: { attachmentId: 'a3', size: 11 }, parts: [{ mimeType: 'text/html', body: { data: b64('<p>ATTACKER</p>') } }] },
+          { mimeType: 'text/html', filename: 'page.html', body: { data: b64('<p>ATTACKER</p>'), size: 15 } },
+        ],
+      },
+    };
+    ctx.google.mailbox(OWNER).drafts.push({ id: 'd34', message });
+    assert.equal((await call(client, 'mail_get_draft', { account: OWNER, draft_id: 'd34' })).body, 'my own text');
+    await call(client, 'mail_update_draft', { account: OWNER, draft_id: 'd34', cc: 'josh@example.com' });
+    const mime = decodeRaw(ctx.google.mailbox(OWNER).drafts.find((d) => d.id === 'd34').message.raw);
+    assert.deepEqual(leafParts(mime).map((p) => [p.type, p.text.slice(0, 11)]), [['text/plain', 'my own text'], ['application/octet-stream', '%PDF-a3....'], ['text/html', '<p>ATTACKER']]);
+    assert.doesNotMatch(mime, /multipart\/alternative/);
+  });
+
+  test('reads hostile draft HTML quickly and without crashing', async () => {
+    const b64 = (t) => Buffer.from(t).toString('base64url');
+    for (const [id, html] of [['d35', '<'.repeat(1e6)], ['d36', '<style'.repeat(2e5)], ['d37', 'a&#99999999;b']]) {
+      const message = { id: `${id}-msg`, threadId: 't1', labelIds: ['DRAFT'], payload: { mimeType: 'text/html', headers: [], body: { data: b64(html) } } };
+      ctx.google.mailbox(OWNER).drafts.push({ id, message });
+      const start = Date.now();
+      await call(client, 'mail_get_draft', { account: OWNER, draft_id: id });
+      assert.ok(Date.now() - start < 1000, `${id} took ${Date.now() - start} ms`);
+    }
+    assert.equal((await call(client, 'mail_get_draft', { account: OWNER, draft_id: 'd37' })).body, 'a&#99999999;b');
   });
 
   test('rejects header injection when updating a draft', async () => {
