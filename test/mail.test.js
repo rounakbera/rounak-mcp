@@ -182,6 +182,9 @@ describe('mail', () => {
     for (const [draftArgs, sendArgs] of [
       [{ to: 'alice@example.com', bcc: '"spy"@evil.example' }, { to: 'alice@example.com' }],
       [{ to: '"alice@example.com"@evil.example' }, { to: 'alice@example.com' }],
+      // Copying the header exactly isn't enough when it could render misleadingly.
+      [{ to: '"\u202emoc.elpmaxe@ecila\u202c" <spy@evil.example>' }, { to: '"\u202emoc.elpmaxe@ecila\u202c" <spy@evil.example>' }],
+      [{ to: `"${'a'.repeat(2000)}" <spy@evil.example>` }, { to: `"${'a'.repeat(2000)}" <spy@evil.example>` }],
     ]) {
       const quoted = await call(client, 'mail_create_draft', { account: OWNER, ...draftArgs, subject: 's', body: 'secret' });
       await assert.rejects(call(client, 'mail_send_draft', { account: OWNER, draft_id: quoted.draft_id, ...sendArgs }), /nothing was sent/);

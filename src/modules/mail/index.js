@@ -210,6 +210,10 @@ export default {
         const current = recipients(message);
         const mismatched = ['to', 'cc', 'bcc'].filter((f) => normalized(args[f]) !== normalized(current[f]));
         if (mismatched.length) throw new Error(`The draft's ${mismatched.join(', ')} differ from what was given; nothing was sent`);
+        // Invisible or direction-changing characters, or a very long list, could hide a recipient in the prompt.
+        if (['to', 'cc', 'bcc'].some((f) => /[\p{Cc}\p{Cf}]/u.test(current[f] ?? '') || (current[f] ?? '').length > 2000)) {
+          throw new Error("The draft's recipients contain hidden characters or are too long to check; nothing was sent");
+        }
         const sent = await gmail(args, 'POST', '/drafts/send', { id: args.draft_id });
         return { message_id: sent.id, thread_id: sent.threadId, ...recipients(message) };
       },
