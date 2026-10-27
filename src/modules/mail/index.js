@@ -100,16 +100,19 @@ export default {
       },
     );
 
-    // Maps the given draft message IDs to their draft IDs, paging through the account's drafts.
+    // Maps the given draft message IDs to their draft IDs, paging through the account's drafts. It's
+    // extra detail for a thread read, so a failed lookup leaves IDs out instead of failing the read.
     async function draftIds(args, messageIds) {
       const found = new Map();
       let pageToken;
-      for (let page = 0; page < 10 && found.size < messageIds.length; page++) {
-        const q = new URLSearchParams({ maxResults: 500, ...(pageToken && { pageToken }) });
-        const { drafts = [], nextPageToken } = await gmail(args, 'GET', `/drafts?${q}`);
-        for (const d of drafts) if (messageIds.includes(d.message.id)) found.set(d.message.id, d.id);
-        if (!(pageToken = nextPageToken)) break;
-      }
+      try {
+        for (let page = 0; page < 10 && found.size < messageIds.length; page++) {
+          const q = new URLSearchParams({ maxResults: 500, ...(pageToken && { pageToken }) });
+          const { drafts = [], nextPageToken } = await gmail(args, 'GET', `/drafts?${q}`);
+          for (const d of drafts) if (messageIds.includes(d.message.id)) found.set(d.message.id, d.id);
+          if (!(pageToken = nextPageToken)) break;
+        }
+      } catch {}
       return found;
     }
 
@@ -307,10 +310,10 @@ export default {
       DESTRUCTIVE,
       async (args) => {
         const message = `/messages/${encodeURIComponent(args.message_id)}`;
-        const { labelIds = [] } = await gmail(args, 'GET', `${message}?format=minimal`);
-        if (labelIds.includes('DRAFT')) throw new Error('That message is a draft; use mail_delete_draft with its draft_id from mail_get_thread');
+        const msg = await gmail(args, 'GET', `${message}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`);
+        if (msg.labelIds?.includes('DRAFT')) throw new Error('That message is a draft; use mail_delete_draft with its draft_id from mail_get_thread');
         await gmail(args, 'POST', `${message}/trash`);
-        return { ok: true };
+        return { ok: true, from: header(msg, 'From'), subject: header(msg, 'Subject') };
       },
     );
   },

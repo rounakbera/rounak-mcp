@@ -217,7 +217,8 @@ describe('mail', () => {
     const reply = gmailMessage({ id: 'm12', threadId: 't12', from: 'bob@example.com', subject: 'Re: plan', body: 'second' });
     const first = gmailMessage({ id: 'm11', threadId: 't12', from: 'alice@example.com', subject: 'plan', body: 'first' });
     ctx.google.mailbox(OWNER).threads.push({ id: 't12', messages: [first, reply] });
-    assert.deepEqual(await call(client, 'mail_trash_message', { account: OWNER, message_id: 'm12' }), { ok: true });
+    const trashed = await call(client, 'mail_trash_message', { account: OWNER, message_id: 'm12' });
+    assert.deepEqual(trashed, { ok: true, from: 'bob@example.com', subject: 'Re: plan' });
     assert.deepEqual([first.labelIds, reply.labelIds], [['INBOX', 'UNREAD'], ['UNREAD', 'TRASH']]);
     await assert.rejects(call(client, 'mail_trash_message', { account: OWNER, message_id: 'missing' }), /404/);
   });
